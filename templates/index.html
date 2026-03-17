@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CRM Constructora</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .badge { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:.75rem;font-weight:500; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900" x-data="crm()" x-cloak>
+
+<!-- ═══ LOGIN ════════════════════════════════════════════════════════════════ -->
+<div x-show="!token" class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">🏗️</div>
+      <h1 class="text-2xl font-bold">CRM Constructora</h1>
+      <p class="text-gray-500 text-sm mt-1">Gestión de proyectos y clientes</p>
+    </div>
+    <form @submit.prevent="doLogin" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Correo</label>
+        <input x-model="loginForm.email" type="email" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
+        <input x-model="loginForm.password" type="password" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+      </div>
+      <div x-show="loginError" class="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" x-text="loginError"></div>
+      <button type="submit" :disabled="loginLoading" class="w-full bg-orange-500 text-white py-3 rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50">
+        <span x-text="loginLoading ? 'Iniciando sesión...' : 'Iniciar sesión'"></span>
+      </button>
+    </form>
+    <p class="text-xs text-center text-gray-400 mt-6">admin@constructora.com / admin123</p>
+  </div>
+</div>
+
+<!-- ═══ APP ══════════════════════════════════════════════════════════════════ -->
+<template x-if="token">
+<div class="min-h-screen flex">
+
+  <!-- Sidebar desktop -->
+  <aside class="hidden md:flex flex-col w-60 bg-slate-900 text-white min-h-screen flex-shrink-0">
+    <div class="p-5 border-b border-slate-700 flex items-center gap-2">
+      <span class="text-2xl">🏗️</span>
+      <div><p class="font-bold text-sm">CRM Constructora</p><p class="text-xs text-slate-400">Panel de gestión</p></div>
+    </div>
+    <nav class="flex-1 p-3 space-y-1">
+      <template x-for="item in navItems" :key="item.page">
+        <button @click="go(item.page)" :class="page===item.page?'bg-orange-500 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left">
+          <span x-text="item.icon"></span><span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+    <div class="p-4 border-t border-slate-700">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center text-sm font-bold" x-text="(user?.name||'?')[0].toUpperCase()"></div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium truncate" x-text="user?.name"></p>
+          <p class="text-xs text-slate-400 capitalize" x-text="user?.role"></p>
+        </div>
+      </div>
+      <button @click="doLogout" class="text-xs text-slate-400 hover:text-white transition-colors">Cerrar sesión →</button>
+    </div>
+  </aside>
+
+  <!-- Mobile header -->
+  <div class="md:hidden fixed top-0 left-0 right-0 z-30 bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-2"><span class="text-xl">🏗️</span><span class="font-bold text-sm">CRM Constructora</span></div>
+    <button @click="mobileOpen=!mobileOpen" class="text-xl" x-text="mobileOpen?'✕':'☰'"></button>
+  </div>
+  <div x-show="mobileOpen" class="md:hidden fixed inset-0 z-20 bg-slate-900 text-white pt-14 px-4 pb-4">
+    <nav class="space-y-1">
+      <template x-for="item in navItems" :key="item.page">
+        <button @click="go(item.page)" :class="page===item.page?'bg-orange-500 text-white':'text-slate-300'" class="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium text-left">
+          <span x-text="item.icon"></span><span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+    <button @click="doLogout" class="mt-6 text-sm text-slate-400">Cerrar sesión →</button>
+  </div>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-auto pt-14 md:pt-0">
+    <div class="p-4 md:p-6 max-w-7xl mx-auto">
+
+      <!-- DASHBOARD -->
+      <template x-if="page==='dashboard'">
+        <div x-data="dashboardPage()">
+          <div class="space-y-6">
+            <div>
+              <h1 class="text-2xl font-bold">Buenos días, <span x-text="(user?.name||'').split(' ')[0]"></span> 👋</h1>
+              <p class="text-gray-500 text-sm">Resumen de tu constructora</p>
+            </div>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <template x-if="!loading && data">
+              <div class="space-y-5">
+                <!-- Stat cards -->
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-xl">👥</div>
+                    <div><p class="text-sm text-gray-500">Clientes</p><p class="text-2xl font-bold" x-text="data.stats.total_clients"></p></div>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center text-xl">🏗️</div>
+                    <div><p class="text-sm text-gray-500">En proceso</p><p class="text-2xl font-bold" x-text="data.stats.projects_en_proceso"></p></div>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center text-xl">✅</div>
+                    <div><p class="text-sm text-gray-500">Mis tareas</p><p class="text-2xl font-bold" x-text="data.stats.my_tasks"></p></div>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center text-xl">💰</div>
+                    <div><p class="text-sm text-gray-500">Cartera</p><p class="text-2xl font-bold" x-text="fmt(data.stats.total_budget)"></p></div>
+                  </div>
+                </div>
+                <!-- Breakdown -->
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
+                    <p class="text-3xl font-bold text-blue-600" x-text="data.stats.projects_cotizacion"></p>
+                    <p class="text-sm text-gray-500 mt-1">Cotizaciones</p>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
+                    <p class="text-3xl font-bold text-yellow-600" x-text="data.stats.projects_en_proceso"></p>
+                    <p class="text-sm text-gray-500 mt-1">En proceso</p>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
+                    <p class="text-3xl font-bold text-green-600" x-text="data.stats.projects_completado"></p>
+                    <p class="text-sm text-gray-500 mt-1">Completados</p>
+                  </div>
+                </div>
+                <!-- Recent + upcoming -->
+                <div class="grid lg:grid-cols-2 gap-6">
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <div class="flex items-center justify-between mb-4">
+                      <h2 class="font-semibold">Proyectos recientes</h2>
+                      <button @click="go('projects')" class="text-xs text-orange-500 hover:underline">Ver todos →</button>
+                    </div>
+                    <div class="space-y-3">
+                      <p x-show="data.recent_projects.length===0" class="text-sm text-gray-400">Sin proyectos aún</p>
+                      <template x-for="p in data.recent_projects" :key="p.id">
+                        <div @click="goProject(p.id)" class="flex items-center justify-between hover:bg-gray-50 rounded-lg p-2 -mx-2 cursor-pointer">
+                          <div>
+                            <p class="text-sm font-medium" x-text="p.name"></p>
+                            <p class="text-xs text-gray-500" x-text="p.client_name||'Sin cliente'"></p>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span x-show="p.budget" class="text-xs text-gray-500" x-text="fmt(p.budget)"></span>
+                            <span class="badge" :style="statusStyle(p.status)" x-text="statusLabel(p.status)"></span>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                    <div class="flex items-center justify-between mb-4">
+                      <h2 class="font-semibold">Próximas tareas</h2>
+                      <button @click="go('tasks')" class="text-xs text-orange-500 hover:underline">Ver todas →</button>
+                    </div>
+                    <div class="space-y-3">
+                      <p x-show="data.upcoming_tasks.length===0" class="text-sm text-gray-400">No hay tareas próximas</p>
+                      <template x-for="t in data.upcoming_tasks" :key="t.id">
+                        <div class="flex items-center justify-between">
+                          <div>
+                            <p class="text-sm font-medium" x-text="t.title"></p>
+                            <p class="text-xs text-gray-500" x-text="(t.project_name||'')+(t.assigned_name?' · '+t.assigned_name:'')"></p>
+                          </div>
+                          <span class="text-xs text-gray-500" x-text="(t.due_date||'').slice(0,10)"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <!-- Activity -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                  <h2 class="font-semibold mb-4">Actividad reciente</h2>
+                  <div class="space-y-2">
+                    <p x-show="data.recent_activities.length===0" class="text-sm text-gray-400">Sin actividad</p>
+                    <template x-for="a in data.recent_activities" :key="a.id">
+                      <div class="flex items-start gap-3 text-sm">
+                        <div class="w-6 h-6 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center text-xs flex-shrink-0 mt-0.5" x-text="(a.user_name||'?')[0].toUpperCase()"></div>
+                        <div>
+                          <span class="text-gray-700" x-text="a.description"></span>
+                          <span class="text-gray-400 text-xs ml-2" x-text="(a.created_at||'').slice(0,16).replace('T',' ')"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <!-- CLIENTES -->
+      <template x-if="page==='clients'">
+        <div x-data="clientsPage()">
+          <div class="space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h1 class="text-2xl font-bold">Clientes</h1>
+                <p class="text-sm text-gray-500" x-text="items.length+' clientes registrados'"></p>
+              </div>
+              <button @click="openNew()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors">+ Nuevo cliente</button>
+            </div>
+            <input x-model="search" placeholder="Buscar por nombre, ciudad, email..." class="w-full max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <template x-if="!loading && filtered.length===0">
+              <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+                <p class="text-4xl mb-2">👥</p>
+                <p class="text-gray-500">No hay clientes<span x-show="search"> con ese criterio</span></p>
+                <button x-show="!search" @click="openNew()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-medium mt-4 hover:bg-orange-600">Agregar primer cliente</button>
+              </div>
+            </template>
+            <div x-show="!loading && filtered.length>0" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <template x-for="c in filtered" :key="c.id">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
+                  <div class="flex items-start justify-between">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold" x-text="c.name[0].toUpperCase()"></div>
+                      <div>
+                        <p class="font-semibold" x-text="c.name"></p>
+                        <p x-show="c.city" class="text-xs text-gray-500">📍 <span x-text="c.city"></span></p>
+                      </div>
+                    </div>
+                    <span class="badge" style="background:#dbeafe;color:#1d4ed8" x-text="c.project_count+' proy.'"></span>
+                  </div>
+                  <div class="mt-3 space-y-1 text-sm text-gray-600">
+                    <p x-show="c.email">✉️ <span x-text="c.email"></span></p>
+                    <p x-show="c.phone">📞 <span x-text="c.phone"></span></p>
+                    <p x-show="c.rfc" class="text-xs text-gray-400">RFC: <span x-text="c.rfc"></span></p>
+                  </div>
+                  <p x-show="c.notes" class="text-xs text-gray-400 mt-2 border-t pt-2" x-text="c.notes"></p>
+                  <div class="flex gap-2 mt-4">
+                    <button @click="openEdit(c)" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">Editar</button>
+                    <button x-show="user?.role==='admin'" @click="del(c.id)" class="bg-red-500 text-white px-3 py-2 rounded-lg text-sm hover:bg-red-600">🗑️</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+          <!-- Modal cliente -->
+          <div x-show="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div class="flex items-center justify-between p-5 border-b">
+                <h2 class="font-semibold" x-text="editing?'Editar cliente':'Nuevo cliente'"></h2>
+                <button @click="modal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <form @submit.prevent="save()" class="p-5 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Nombre *</label><input x-model="form.name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Email</label><input x-model="form.email" type="email" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label><input x-model="form.phone" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Ciudad</label><input x-model="form.city" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">RFC</label><input x-model="form.rfc" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Dirección</label><input x-model="form.address" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea x-model="form.notes" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                </div>
+                <div class="flex gap-3 pt-2">
+                  <button type="button" @click="modal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                  <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- PROYECTOS -->
+      <template x-if="page==='projects'">
+        <div x-data="projectsPage()">
+          <div class="space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h1 class="text-2xl font-bold">Proyectos</h1>
+                <p class="text-sm text-gray-500" x-text="items.length+' proyectos registrados'"></p>
+              </div>
+              <button @click="openNew()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors">+ Nuevo proyecto</button>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-3">
+              <input x-model="search" placeholder="Buscar..." class="w-full max-w-xs border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+              <div class="flex gap-2 flex-wrap">
+                <template x-for="f in filters" :key="f.v">
+                  <button @click="filter=f.v" :class="filter===f.v?'bg-orange-500 text-white':'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" x-text="f.l"></button>
+                </template>
+              </div>
+            </div>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <template x-if="!loading && filtered.length===0">
+              <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center"><p class="text-4xl mb-2">🏗️</p><p class="text-gray-500">No hay proyectos</p></div>
+            </template>
+            <div x-show="!loading && filtered.length>0" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <template x-for="p in filtered" :key="p.id">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow flex flex-col">
+                  <div class="flex items-start justify-between mb-2">
+                    <span class="badge" :style="statusStyle(p.status)" x-text="statusLabel(p.status)"></span>
+                    <span class="text-xs text-gray-400" x-text="(p.start_date||'').slice(0,10)||'—'"></span>
+                  </div>
+                  <p @click="goProject(p.id)" class="font-semibold hover:text-orange-600 cursor-pointer mb-1" x-text="p.name"></p>
+                  <p class="text-sm text-gray-500 mb-1" x-text="p.client_name||'Sin cliente'"></p>
+                  <p x-show="p.location" class="text-xs text-gray-400 mb-2">📍 <span x-text="p.location"></span></p>
+                  <div class="flex items-center justify-between text-sm mt-auto pt-3 border-t">
+                    <span class="font-semibold" x-text="fmt(p.budget)"></span>
+                    <span class="text-xs text-gray-500" x-text="(p.tasks_done||0)+'/'+(p.task_count||0)+' tareas'"></span>
+                  </div>
+                  <div x-show="p.task_count>0" class="mt-2 bg-gray-100 rounded-full h-1.5">
+                    <div class="bg-orange-500 h-1.5 rounded-full" :style="'width:'+Math.round(((p.tasks_done||0)/(p.task_count||1))*100)+'%'"></div>
+                  </div>
+                  <div class="flex gap-2 mt-3">
+                    <button @click="goProject(p.id)" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">Ver detalle</button>
+                    <button @click="openEdit(p)" class="border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm hover:bg-gray-50">✏️</button>
+                    <button x-show="user?.role==='admin'" @click="del(p.id)" class="bg-red-500 text-white px-3 py-2 rounded-lg text-sm hover:bg-red-600">🗑️</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+          <!-- Modal proyecto -->
+          <div x-show="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div class="flex items-center justify-between p-5 border-b">
+                <h2 class="font-semibold" x-text="editing?'Editar proyecto':'Nuevo proyecto'"></h2>
+                <button @click="modal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <form @submit.prevent="save()" class="p-5 space-y-3">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Nombre *</label><input x-model="form.name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+                    <select x-model="form.client_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="">Sin cliente</option><template x-for="c in clients" :key="c.id"><option :value="c.id" x-text="c.name"></option></template></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                    <select x-model="form.status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="cotizacion">Cotización</option><option value="en_proceso">En proceso</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Presupuesto ($)</label><input x-model="form.budget" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Responsable</label>
+                    <select x-model="form.assigned_to" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="">Sin asignar</option><template x-for="u in team" :key="u.id"><option :value="u.id" x-text="u.name"></option></template></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Fecha inicio</label><input x-model="form.start_date" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Fecha fin</label><input x-model="form.end_date" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                </div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Ubicación</label><input x-model="form.location" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label><textarea x-model="form.description" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                <div class="flex gap-3 pt-2">
+                  <button type="button" @click="modal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                  <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- DETALLE PROYECTO -->
+      <template x-if="page==='project-detail'">
+        <div x-data="projectDetailPage(projectId)">
+          <div class="space-y-5">
+            <div class="flex items-center gap-2 text-sm text-gray-500">
+              <button @click="go('projects')" class="hover:text-orange-500">Proyectos</button>
+              <span>›</span>
+              <span class="font-medium text-gray-900" x-text="project?.name||'...'"></span>
+            </div>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <template x-if="!loading && project">
+              <div class="space-y-5">
+                <!-- Header -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                  <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div>
+                      <div class="flex items-center gap-3 mb-2">
+                        <h1 class="text-2xl font-bold" x-text="project.name"></h1>
+                        <span class="badge" :style="statusStyle(project.status)" x-text="statusLabel(project.status)"></span>
+                      </div>
+                      <p x-show="project.client_name" class="text-gray-600">👥 <span x-text="project.client_name"></span></p>
+                      <p x-show="project.location" class="text-gray-500 text-sm">📍 <span x-text="project.location"></span></p>
+                      <p x-show="project.description" class="text-gray-500 text-sm mt-2" x-text="project.description"></p>
+                    </div>
+                    <div class="text-right">
+                      <p class="text-2xl font-bold" x-text="fmt(project.budget)"></p>
+                      <p class="text-sm text-gray-500">Presupuesto</p>
+                      <p x-show="project.start_date" class="text-xs text-gray-400" x-text="(project.start_date||'').slice(0,10)+' → '+(project.end_date||'...').slice(0,10)"></p>
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <div class="flex justify-between text-sm mb-1"><span class="text-gray-600">Progreso</span><span class="font-medium" x-text="pct()+'%'"></span></div>
+                    <div class="bg-gray-100 rounded-full h-2"><div class="bg-orange-500 h-2 rounded-full" :style="'width:'+pct()+'%'"></div></div>
+                    <p class="text-xs text-gray-400 mt-1" x-text="doneTasks()+' de '+totalTasks()+' tareas completadas'"></p>
+                  </div>
+                </div>
+                <!-- Kanban -->
+                <div class="flex items-center justify-between">
+                  <h2 class="text-lg font-semibold">Tareas del proyecto</h2>
+                  <button @click="openTask(null)" class="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600">+ Nueva tarea</button>
+                </div>
+                <div class="grid md:grid-cols-3 gap-4">
+                  <template x-for="col in kanbanCols" :key="col.status">
+                    <div class="bg-gray-50 rounded-xl p-3 border-t-4" :class="col.border">
+                      <h3 class="text-sm font-semibold text-gray-700 mb-3" x-text="col.label+' ('+tasksByStatus(col.status).length+')'"></h3>
+                      <div class="space-y-2">
+                        <template x-for="t in tasksByStatus(col.status)" :key="t.id">
+                          <div class="bg-white rounded-lg p-3 shadow-sm border border-gray-100">
+                            <div class="flex items-start justify-between gap-2">
+                              <p class="text-sm font-medium flex-1" x-text="t.title"></p>
+                              <div class="flex gap-1">
+                                <button @click="openTask(t)" class="text-gray-400 hover:text-gray-600 text-xs">✏️</button>
+                                <button @click="delTask(t.id)" class="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
+                              </div>
+                            </div>
+                            <p x-show="t.description" class="text-xs text-gray-500 mt-1" x-text="t.description"></p>
+                            <span class="badge mt-2" :style="priorityStyle(t.priority)" x-text="priorityLabel(t.priority)"></span>
+                            <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
+                              <span x-text="t.assigned_name||'Sin asignar'"></span>
+                              <span x-show="t.due_date" x-text="(t.due_date||'').slice(0,10)"></span>
+                            </div>
+                          </div>
+                        </template>
+                        <p x-show="tasksByStatus(col.status).length===0" class="text-xs text-gray-400 text-center py-3">Sin tareas</p>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          <!-- Modal tarea -->
+          <div x-show="taskModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+              <div class="flex items-center justify-between p-5 border-b">
+                <h2 class="font-semibold" x-text="editingTask?'Editar tarea':'Nueva tarea'"></h2>
+                <button @click="taskModal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <form @submit.prevent="saveTask()" class="p-5 space-y-3">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Título *</label><input x-model="taskForm.title" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label><textarea x-model="taskForm.description" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                    <select x-model="taskForm.status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="pendiente">Pendiente</option><option value="en_proceso">En proceso</option><option value="completado">Completado</option></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
+                    <select x-model="taskForm.priority" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="baja">Baja</option><option value="media">Media</option><option value="alta">Alta</option></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Asignar a</label>
+                    <select x-model="taskForm.assigned_to" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="">Sin asignar</option><template x-for="u in team" :key="u.id"><option :value="u.id" x-text="u.name"></option></template></select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Fecha límite</label><input x-model="taskForm.due_date" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                </div>
+                <div class="flex gap-3 pt-2">
+                  <button type="button" @click="taskModal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                  <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- TAREAS -->
+      <template x-if="page==='tasks'">
+        <div x-data="tasksPage()">
+          <div class="space-y-5">
+            <div>
+              <h1 class="text-2xl font-bold">Tareas</h1>
+              <p class="text-sm text-gray-500" x-text="items.filter(t=>t.status!=='completado').length+' tareas pendientes'"></p>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <template x-for="f in filters" :key="f.v">
+                <button @click="filter=f.v" :class="filter===f.v?'bg-orange-500 text-white':'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors" x-text="f.l"></button>
+              </template>
+            </div>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <template x-if="!loading && filtered.length===0">
+              <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center"><p class="text-4xl mb-2">✅</p><p class="text-gray-500">No hay tareas con este filtro</p></div>
+            </template>
+            <div x-show="!loading && filtered.length>0" class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-50 border-b">
+                  <tr>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Tarea</th>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Proyecto</th>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Asignado</th>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Estado</th>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Prioridad</th>
+                    <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Vence</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  <template x-for="t in filtered" :key="t.id">
+                    <tr :class="isOverdue(t)?'bg-red-50':''" class="hover:bg-gray-50 transition-colors">
+                      <td class="px-4 py-3">
+                        <p class="font-medium" x-text="t.title"></p>
+                        <p x-show="t.description" class="text-xs text-gray-400 truncate max-w-xs" x-text="t.description"></p>
+                      </td>
+                      <td class="px-4 py-3 hidden md:table-cell">
+                        <button x-show="t.project_id" @click="goProject(t.project_id)" class="text-orange-500 hover:underline" x-text="t.project_name"></button>
+                        <span x-show="!t.project_id" class="text-gray-400">—</span>
+                      </td>
+                      <td class="px-4 py-3 text-gray-600 hidden md:table-cell" x-text="t.assigned_name||'—'"></td>
+                      <td class="px-4 py-3">
+                        <select class="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-orange-500" :value="t.status" @change="changeStatus(t,$event.target.value)">
+                          <option value="pendiente">Pendiente</option>
+                          <option value="en_proceso">En proceso</option>
+                          <option value="completado">Completado</option>
+                        </select>
+                      </td>
+                      <td class="px-4 py-3 hidden sm:table-cell"><span class="badge" :style="priorityStyle(t.priority)" x-text="priorityLabel(t.priority)"></span></td>
+                      <td class="px-4 py-3 hidden lg:table-cell"><span :class="isOverdue(t)?'text-red-600 font-medium':'text-gray-500'" class="text-xs" x-text="((t.due_date||'').slice(0,10)||'—')+(isOverdue(t)?' ⚠️':'')"></span></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- EQUIPO -->
+      <template x-if="page==='team'">
+        <div x-data="teamPage()">
+          <div class="space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h1 class="text-2xl font-bold">Equipo</h1>
+                <p class="text-sm text-gray-500" x-text="items.filter(u=>u.active).length+' miembros activos'"></p>
+              </div>
+              <button x-show="user?.role==='admin'" @click="openNew()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors">+ Agregar miembro</button>
+            </div>
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <div x-show="!loading" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <template x-for="u in items" :key="u.id">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5" :class="!u.active?'opacity-60':''">
+                  <div class="flex items-center gap-3 mb-3">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold" :class="u.role==='admin'?'bg-purple-100 text-purple-600':u.role==='manager'?'bg-blue-100 text-blue-600':'bg-orange-100 text-orange-600'" x-text="u.name[0].toUpperCase()"></div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <p class="font-semibold truncate" x-text="u.name"></p>
+                        <span x-show="u.id===user?.id" class="badge" style="background:#fed7aa;color:#c2410c">Tú</span>
+                      </div>
+                      <span class="badge" :style="roleStyle(u.role)" x-text="roleLabel(u.role)"></span>
+                    </div>
+                  </div>
+                  <p class="text-sm text-gray-500 mb-3">✉️ <span x-text="u.email"></span></p>
+                  <div class="flex items-center justify-between text-xs text-gray-400 border-t pt-3">
+                    <span x-text="u.project_count+' proyectos · '+u.pending_tasks+' tareas'"></span>
+                    <span x-show="!u.active" class="badge" style="background:#fee2e2;color:#b91c1c">Inactivo</span>
+                  </div>
+                  <div x-show="user?.role==='admin' && u.id!==user?.id" class="flex gap-2 mt-3">
+                    <button @click="openEdit(u)" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">Editar</button>
+                    <button @click="toggle(u)" :class="u.active?'border-red-200 text-red-600 hover:bg-red-50':'border-green-200 text-green-600 hover:bg-green-50'" class="border px-3 py-2 rounded-lg text-sm" x-text="u.active?'Desactivar':'Activar'"></button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+          <!-- Modal equipo -->
+          <div x-show="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+              <div class="flex items-center justify-between p-5 border-b">
+                <h2 class="font-semibold" x-text="editing?'Editar miembro':'Nuevo miembro'"></h2>
+                <button @click="modal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <form @submit.prevent="save()" class="p-5 space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Nombre completo *</label><input x-model="form.name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Email *</label><input x-model="form.email" type="email" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1" x-text="editing?'Nueva contraseña (vacío = sin cambio)':'Contraseña *'"></label><input x-model="form.password" type="password" :required="!editing" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+                  <select x-model="form.role" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="staff">Colaborador</option><option value="manager">Gerente</option><option value="admin">Administrador</option></select>
+                </div>
+                <div class="flex gap-3 pt-2">
+                  <button type="button" @click="modal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                  <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </template>
+
+    </div>
+  </main>
+</div>
+</template>
+
+<script src="/static/js/app.js?v=4"></script>
+</body>
+</html>
