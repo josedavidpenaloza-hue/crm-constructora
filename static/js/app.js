@@ -343,11 +343,21 @@ function projectDetailPage(pid) {
       { status: 'en_proceso', label: 'En proceso',  border: 'border-yellow-400' },
       { status: 'completado', label: 'Completadas', border: 'border-green-400' },
     ],
+    // ── Units (merged to avoid nested x-data with null project reference) ──
+    units: [], unitsLoading: false, unitModal: false, editingUnit: null, unitForm: {},
+    unitStatusColors: { disponible: 'bg-green-100 text-green-800', reservado: 'bg-yellow-100 text-yellow-800', vendido: 'bg-red-100 text-red-800' },
     fmt, statusLabel, statusStyle, priorityLabel, priorityStyle,
     tasksByStatus(s) { return (this.project?.tasks || []).filter(t => t.status === s); },
     doneTasks() { return (this.project?.tasks || []).filter(t => t.status === 'completado').length; },
     totalTasks() { return (this.project?.tasks || []).length; },
     pct() { const t = this.totalTasks(); return t > 0 ? Math.round(this.doneTasks() / t * 100) : 0; },
+    unitSummary() {
+      const total = this.units.length;
+      const disp  = this.units.filter(u => u.status === 'disponible').length;
+      const res   = this.units.filter(u => u.status === 'reservado').length;
+      const vend  = this.units.filter(u => u.status === 'vendido').length;
+      return { total, disp, res, vend };
+    },
     async init() {
       await this.load();
     },
@@ -357,6 +367,30 @@ function projectDetailPage(pid) {
       const [p, team] = await Promise.all([get('/projects/' + pid), get('/team')]);
       this.project = p; this.team = team || [];
       this.loading = false;
+      await this.loadUnits();
+    },
+    async loadUnits() {
+      if (!pid) return;
+      this.unitsLoading = true;
+      this.units = await get('/projects/' + pid + '/units') || [];
+      this.unitsLoading = false;
+    },
+    openNewUnit() {
+      this.editingUnit = null;
+      this.unitForm = { unit_number: '', floor: '', area_m2: '', bedrooms: 2, bathrooms: 1, price: '', status: 'disponible', notes: '' };
+      this.unitModal = true;
+    },
+    openEditUnit(u) { this.editingUnit = u; this.unitForm = { ...u }; this.unitModal = true; },
+    async saveUnit() {
+      if (this.editingUnit) await put('/units/' + this.editingUnit.id, this.unitForm);
+      else await post('/projects/' + pid + '/units', this.unitForm);
+      await this.loadUnits();
+      this.unitModal = false;
+    },
+    async delUnit(id) {
+      if (!confirm('¿Eliminar esta unidad?')) return;
+      await del('/units/' + id);
+      await this.loadUnits();
     },
     openTask(t) {
       this.editingTask = t;

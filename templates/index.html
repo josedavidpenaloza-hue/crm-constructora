@@ -565,57 +565,57 @@
             </template>
           </div>
           <!-- Unidades del proyecto -->
-          <div x-data="projectUnits(project.id)" class="mt-4">
+          <div class="mt-4" x-show="!loading">
             <div class="flex items-center justify-between mb-3">
               <div>
                 <h2 class="text-lg font-semibold">🏠 Unidades del proyecto</h2>
                 <p class="text-xs text-gray-500">
-                  <span class="text-green-600 font-medium" x-text="summary().disp"></span> disponibles ·
-                  <span class="text-yellow-600 font-medium" x-text="summary().res"></span> reservadas ·
-                  <span class="text-red-600 font-medium" x-text="summary().vend"></span> vendidas
-                  de <span x-text="summary().total"></span> total
+                  <span class="text-green-600 font-medium" x-text="unitSummary().disp"></span> disponibles ·
+                  <span class="text-yellow-600 font-medium" x-text="unitSummary().res"></span> reservadas ·
+                  <span class="text-red-600 font-medium" x-text="unitSummary().vend"></span> vendidas
+                  de <span x-text="unitSummary().total"></span> total
                 </p>
               </div>
-              <button @click="openNew()" class="bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-orange-600">+ Unidad</button>
+              <button @click="openNewUnit()" class="bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-orange-600">+ Unidad</button>
             </div>
-            <div x-show="loading" class="text-gray-400 text-sm py-4 text-center">Cargando unidades...</div>
-            <div x-show="!loading && units.length===0" class="text-gray-400 text-sm py-4 text-center">Sin unidades registradas</div>
-            <div x-show="!loading && units.length>0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+            <div x-show="unitsLoading" class="text-gray-400 text-sm py-4 text-center">Cargando unidades...</div>
+            <div x-show="!unitsLoading && units.length===0" class="text-gray-400 text-sm py-4 text-center">Sin unidades registradas. Haz clic en "+ Unidad" para agregar.</div>
+            <div x-show="!unitsLoading && units.length>0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
               <template x-for="u in units" :key="u.id">
-                <div class="bg-white border rounded-xl p-3 text-center hover:shadow-md cursor-pointer transition-shadow" @click="openEdit(u)">
+                <div class="bg-white border rounded-xl p-3 text-center hover:shadow-md cursor-pointer transition-shadow" @click="openEditUnit(u)">
                   <p class="font-bold text-sm" x-text="u.unit_number"></p>
                   <p x-show="u.bedrooms" class="text-xs text-gray-500" x-text="u.bedrooms+'hab'+(u.area_m2?' · '+u.area_m2+'m²':'')"></p>
                   <p x-show="u.price" class="text-xs font-semibold text-orange-600 mt-1" x-text="fmt(u.price)"></p>
-                  <span class="mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium" :class="statusColors[u.status]" x-text="u.status"></span>
+                  <span class="mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium" :class="unitStatusColors[u.status]" x-text="u.status"></span>
                   <p x-show="u.interested_count>0" class="text-xs text-blue-500 mt-1" x-text="u.interested_count+' interesados'"></p>
                 </div>
               </template>
             </div>
             <!-- Modal unidad -->
-            <div x-show="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div x-show="unitModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
               <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
                 <div class="flex items-center justify-between p-5 border-b">
-                  <h2 class="font-semibold" x-text="editing?'Editar unidad':'Nueva unidad'"></h2>
-                  <button @click="modal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                  <h2 class="font-semibold" x-text="editingUnit?'Editar unidad':'Nueva unidad'"></h2>
+                  <button @click="unitModal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
                 </div>
-                <form @submit.prevent="save()" class="p-5 space-y-3">
+                <form @submit.prevent="saveUnit()" class="p-5 space-y-3">
                   <div class="grid grid-cols-2 gap-3">
-                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Número de unidad *</label><input x-model="form.unit_number" required placeholder="Ej: 101, Casa A, Apto 3B" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Piso</label><input x-model="form.floor" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Área m²</label><input x-model="form.area_m2" type="number" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Habitaciones</label><input x-model="form.bedrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Baños</label><input x-model="form.bathrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Precio ($)</label><input x-model="form.price" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Número de unidad *</label><input x-model="unitForm.unit_number" required placeholder="Ej: 101, Casa A, Apto 3B" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Piso</label><input x-model="unitForm.floor" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Área m²</label><input x-model="unitForm.area_m2" type="number" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Habitaciones</label><input x-model="unitForm.bedrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Baños</label><input x-model="unitForm.bathrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Precio ($)</label><input x-model="unitForm.price" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
                     <div><label class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                      <select x-model="form.status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <select x-model="unitForm.status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
                         <option value="disponible">Disponible</option><option value="reservado">Reservado</option><option value="vendido">Vendido</option>
                       </select>
                     </div>
-                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea x-model="form.notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea x-model="unitForm.notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
                   </div>
                   <div class="flex gap-3 pt-2">
-                    <button type="button" @click="modal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
-                    <button x-show="editing" type="button" @click="del(editing.id)" class="bg-red-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-600">🗑️</button>
+                    <button type="button" @click="unitModal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                    <button x-show="editingUnit" type="button" @click="delUnit(editingUnit.id)" class="bg-red-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-600">🗑️</button>
                     <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
                   </div>
                 </form>
