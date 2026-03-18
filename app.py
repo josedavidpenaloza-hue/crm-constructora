@@ -743,7 +743,7 @@ def ai_whatsapp_webhook():
     db().execute("UPDATE leads SET last_contact=datetime('now') WHERE id=?", (lead_id,))
     db().commit()
 
-    # Generar respuesta con IA
+    # Generar respuesta (IA con API key, o bot por reglas si no hay key)
     ai_key = None
     ai_cfg = db().execute("SELECT * FROM whatsapp_config WHERE id=1").fetchone()
     if ai_cfg:
@@ -755,7 +755,9 @@ def ai_whatsapp_webhook():
         try:
             reply = generate_ai_reply(lead, body, ai_key)
         except Exception as e:
-            reply = None
+            reply = generate_rule_reply(lead, body)
+    else:
+        reply = generate_rule_reply(lead, body)
 
     if reply:
         # Enviar respuesta via Twilio
@@ -775,6 +777,124 @@ def ai_whatsapp_webhook():
             except Exception as e:
                 pass
     return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
+
+
+def generate_rule_reply(lead, msg):
+    """Bot por reglas — funciona sin API key de IA"""
+    msg_l = msg.lower().strip()
+    lead_id = lead['id']
+
+    # Cargar proyectos disponibles
+    projects = rows(db().execute("""
+        SELECT p.name, p.location,
+               COUNT(u.id) as total,
+               SUM(CASE WHEN u.status='disponible' THEN 1 ELSE 0 END) as disp,
+               MIN(u.price) as min_p, MAX(u.price) as max_p,
+               MIN(u.bedrooms) as min_hab, MAX(u.bedrooms) as max_hab
+        FROM projects p LEFT JOIN units u ON u.project_id=p.id
+        WHERE p.status IN ('cotizacion','en_proceso') GROUP BY p.id"""))
+
+    # ── Detección de intención ────────────────────────────────────────────────
+    saludo     = any(w in msg_l for w in ['hola','buenas','buenos','buen día','buendia','hi','hello','saludos'])
+    info_proy  = any(w in msg_l for w in ['proyecto','proyectos','casa','apartamento','apto','vivienda','inmueble','propiedad','unidad','disponible'])
+    precio     = any(w in msg_l for w in ['precio','valor','costo','cuánto','cuanto','vale','cuesta'])
+    credito    = any(w in msg_l for w in ['crédito','credito','préstamo','prestamo','hipoteca','banco','financiamiento','financiar','subsidio','caja','comfenalco','cafam','colsubsidio','compensar'])
+    separacion = any(w in msg_l for w in ['separar','separación','separacion','reservar','reserva','apartar','inicial','cuota inicial'])
+    si_tiene   = any(w in msg_l for w in ['sí','si','claro','tengo','cuento','afirmativo','efectivamente','correcto','ok','oki','dale','listo','ya tengo'])
+    no_tiene   = any(w in msg_l for w in ['no tengo','no cuento','no tengo','todavía no','aun no','aún no','no sé','no se'])
+    gracias    = any(w in msg_l for w in ['gracias','thank','perfecto','excelente','genial','buenísimo'])
+    asesor     = any(w in msg_l for w in ['asesor','agente','persona','humano','hablar con','comunicar'])
+
+    # ── Cualificación automática ──────────────────────────────────────────────
+    updates = []
+    if separacion and si_tiene and not lead.get('tiene_dinero_separacion'):
+        db().execute("UPDATE leads SET tiene_dinero_separacion=1 WHERE id=?", (lead_id,))
+        db().execute("INSERT INTO lead_activities (lead_id,type,description) VALUES (?,?,?)",
+                     (lead_id,'whatsapp','✅ Bot: confirmó dinero para separación'))
+        updates.append('separacion')
+    if credito and si_tiene and not lead.get('tiene_credito'):
+        db().execute("UPDATE leads SET tiene_credito=1 WHERE id=?", (lead_id,))
+        db().execute("INSERT INTO lead_activities (lead_id,type,description) VALUES (?,?,?)",
+                     (lead_id,'whatsapp','✅ Bot: confirmó acceso a crédito/subsidio'))
+        updates.append('credito')
+    if updates:
+        db().commit()
+        # Verificar si ya está completamente cualificado
+        updated_lead = row(db().execute("SELECT * FROM leads WHERE id=?", (lead_id,)))
+        if (updated_lead.get('tiene_dinero_separacion') and
+            (updated_lead.get('tiene_credito') or updated_lead.get('tiene_subsidio'))):
+            db().execute("UPDATE leads SET stage='calificacion' WHERE id=?", (lead_id,))
+            db().commit()
+
+    # ── Construir respuesta ───────────────────────────────────────────────────
+    nombre = (lead.get('name') or 'amigo').split()[0]
+    if nombre.startswith('Lead WA'):
+        nombre = 'amigo'
+
+    # Texto de proyectos disponibles
+    def proyectos_texto():
+        if not projects:
+            return "En este momento estamos preparando nuevos proyectos. ¡Te avisamos pronto! 🔜"
+        lines = []
+        for p in projects:
+            hab = f"{p['min_hab']}" if p['min_hab']==p['max_hab'] else f"{p['min_hab']}-{p['max_hab']}"
+            precio_txt = f"desde ${p['min_p']:,.0f}" if p['min_p'] else "consultar precio"
+            lines.append(f"🏠 *{p['name']}* — {p['location']}\n   {p['disp']} unidades disponibles | {hab} hab | {precio_txt}")
+        return "\n\n".join(lines)
+
+    # Solicitar asesor humano
+    if asesor:
+        db().execute("UPDATE leads SET stage='seguimiento' WHERE id=?", (lead_id,))
+        db().commit()
+        return f"¡Por supuesto, {nombre}! 😊 Voy a notificar a uno de nuestros asesores para que te contacte lo antes posible.\n\nMientras tanto, ¿hay algo más en lo que te pueda ayudar?"
+
+    if gracias:
+        return f"¡Con gusto, {nombre}! 😊 Estamos para servirte. Si tienes más preguntas sobre nuestros proyectos, aquí estaré. 🏗️"
+
+    if saludo and lead.get('stage') == 'nuevo':
+        db().execute("UPDATE leads SET stage='contactado' WHERE id=?", (lead_id,))
+        db().commit()
+        proy_txt = proyectos_texto()
+        return (f"¡Hola! 👋 Soy Sofía, asesora de Constructora. ¡Qué bueno que nos contactas!\n\n"
+                f"Actualmente tenemos estos proyectos disponibles:\n\n{proy_txt}\n\n"
+                f"¿Cuál te llama más la atención? 😊")
+
+    if saludo:
+        return f"¡Hola de nuevo, {nombre}! 😊 ¿En qué te puedo ayudar hoy?"
+
+    if precio:
+        proy_txt = proyectos_texto()
+        return (f"Claro, {nombre}! 💰 Aquí los precios de nuestros proyectos:\n\n{proy_txt}\n\n"
+                f"¿Te gustaría conocer más detalles de alguno en particular?")
+
+    if info_proy:
+        proy_txt = proyectos_texto()
+        return f"¡Con mucho gusto! 🏗️ Estos son nuestros proyectos:\n\n{proy_txt}\n\n¿Cuál te interesa más?"
+
+    if separacion and not si_tiene and not no_tiene:
+        return (f"{nombre}, para separar tu unidad manejamos una cuota inicial accesible. "
+                f"¿Ya cuentas con los recursos para la separación? 💰")
+
+    if credito and not si_tiene and not no_tiene:
+        return (f"Excelente pregunta, {nombre}! 🏦 Trabajamos con los principales bancos del país "
+                f"y también aplica subsidio de caja de compensación (Comfenalco, Cafam, Colsubsidio, etc).\n\n"
+                f"¿Ya tienes un crédito aprobado o subsidio de tu caja?")
+
+    if 'si_tiene' in updates:
+        return f"¡Excelente, {nombre}! ✅ Eso nos ayuda mucho. Un asesor te contactará pronto para guiarte en el proceso. 🤝"
+
+    # Respuesta genérica según etapa
+    etapa = lead.get('stage','nuevo')
+    if etapa in ['nuevo','contactado']:
+        proy_txt = proyectos_texto()
+        return (f"Hola {nombre}! 😊 Soy Sofía de Constructora.\n\n"
+                f"Tenemos proyectos increíbles para ti:\n\n{proy_txt}\n\n"
+                f"¿Te puedo contar más sobre alguno? 🏠")
+    elif etapa == 'seguimiento':
+        return f"¡Hola {nombre}! 😊 Seguimos aquí para ayudarte. ¿Tienes alguna duda sobre nuestros proyectos o el proceso de compra?"
+    else:
+        return (f"Hola {nombre}! 😊 Gracias por escribirnos. "
+                f"¿En qué te puedo ayudar hoy? Puedo darte información sobre proyectos, precios, créditos o separación.")
 
 
 def generate_ai_reply(lead, user_message, api_key):
