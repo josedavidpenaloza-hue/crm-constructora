@@ -374,6 +374,7 @@
                   <input x-model="waConfig.account_sid" placeholder="Account SID" class="w-full border border-gray-300 rounded px-2 py-1 text-xs"/>
                   <input x-model="waConfig.auth_token" placeholder="Auth Token" type="password" class="w-full border border-gray-300 rounded px-2 py-1 text-xs"/>
                   <input x-model="waConfig.from_number" placeholder="Número Twilio (+14155238886)" class="w-full border border-gray-300 rounded px-2 py-1 text-xs"/>
+                  <input x-model="waConfig.anthropic_key" placeholder="Anthropic API Key (para agente IA)" class="w-full border border-gray-300 rounded px-2 py-1 text-xs"/>
                   <div class="flex gap-2">
                     <button @click="waSaveConfig()" class="flex-1 bg-green-600 text-white text-xs py-1 rounded font-medium">Guardar</button>
                     <button @click="waConfigOpen=false" class="flex-1 border text-xs py-1 rounded">Cancelar</button>
@@ -563,6 +564,65 @@
               </div>
             </template>
           </div>
+          <!-- Unidades del proyecto -->
+          <div x-data="projectUnits(project.id)" class="mt-4">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h2 class="text-lg font-semibold">🏠 Unidades del proyecto</h2>
+                <p class="text-xs text-gray-500">
+                  <span class="text-green-600 font-medium" x-text="summary().disp"></span> disponibles ·
+                  <span class="text-yellow-600 font-medium" x-text="summary().res"></span> reservadas ·
+                  <span class="text-red-600 font-medium" x-text="summary().vend"></span> vendidas
+                  de <span x-text="summary().total"></span> total
+                </p>
+              </div>
+              <button @click="openNew()" class="bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-orange-600">+ Unidad</button>
+            </div>
+            <div x-show="loading" class="text-gray-400 text-sm py-4 text-center">Cargando unidades...</div>
+            <div x-show="!loading && units.length===0" class="text-gray-400 text-sm py-4 text-center">Sin unidades registradas</div>
+            <div x-show="!loading && units.length>0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+              <template x-for="u in units" :key="u.id">
+                <div class="bg-white border rounded-xl p-3 text-center hover:shadow-md cursor-pointer transition-shadow" @click="openEdit(u)">
+                  <p class="font-bold text-sm" x-text="u.unit_number"></p>
+                  <p x-show="u.bedrooms" class="text-xs text-gray-500" x-text="u.bedrooms+'hab'+(u.area_m2?' · '+u.area_m2+'m²':'')"></p>
+                  <p x-show="u.price" class="text-xs font-semibold text-orange-600 mt-1" x-text="fmt(u.price)"></p>
+                  <span class="mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium" :class="statusColors[u.status]" x-text="u.status"></span>
+                  <p x-show="u.interested_count>0" class="text-xs text-blue-500 mt-1" x-text="u.interested_count+' interesados'"></p>
+                </div>
+              </template>
+            </div>
+            <!-- Modal unidad -->
+            <div x-show="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div class="flex items-center justify-between p-5 border-b">
+                  <h2 class="font-semibold" x-text="editing?'Editar unidad':'Nueva unidad'"></h2>
+                  <button @click="modal=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                </div>
+                <form @submit.prevent="save()" class="p-5 space-y-3">
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Número de unidad *</label><input x-model="form.unit_number" required placeholder="Ej: 101, Casa A, Apto 3B" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Piso</label><input x-model="form.floor" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Área m²</label><input x-model="form.area_m2" type="number" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Habitaciones</label><input x-model="form.bedrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Baños</label><input x-model="form.bathrooms" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Precio ($)</label><input x-model="form.price" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                      <select x-model="form.status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="disponible">Disponible</option><option value="reservado">Reservado</option><option value="vendido">Vendido</option>
+                      </select>
+                    </div>
+                    <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea x-model="form.notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                  </div>
+                  <div class="flex gap-3 pt-2">
+                    <button type="button" @click="modal=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                    <button x-show="editing" type="button" @click="del(editing.id)" class="bg-red-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-600">🗑️</button>
+                    <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
           <!-- Modal tarea -->
           <div x-show="taskModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
             <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
@@ -592,6 +652,314 @@
               </form>
             </div>
           </div>
+        </div>
+      </template>
+
+      <!-- VENTAS / PIPELINE -->
+      <template x-if="page==='sales'">
+        <div x-data="leadsPage()">
+          <!-- Header con stats y botones -->
+          <div class="space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h1 class="text-2xl font-bold">Pipeline de Ventas</h1>
+                <p class="text-sm text-gray-500" x-text="leads.length + ' leads en total'"></p>
+              </div>
+              <div class="flex gap-2">
+                <!-- Alarmas badge -->
+                <button @click="remindersOpen=!remindersOpen" class="relative border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50">
+                  🔔
+                  <span x-show="reminders.length>0" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center" x-text="reminders.length"></span>
+                </button>
+                <button @click="openNew()" class="bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">+ Nuevo lead</button>
+              </div>
+            </div>
+
+            <!-- Recordatorios panel -->
+            <div x-show="remindersOpen" class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <h3 class="font-semibold text-amber-800 mb-3">🔔 Alarmas pendientes</h3>
+              <div x-show="reminders.length===0" class="text-sm text-amber-600">Sin alarmas pendientes</div>
+              <div class="space-y-2">
+                <template x-for="r in reminders" :key="r.id">
+                  <div class="flex items-center justify-between bg-white rounded-lg px-3 py-2 border" :class="isOverdue(r)?'border-red-300':'border-gray-200'">
+                    <div>
+                      <p class="text-sm font-medium" :class="isOverdue(r)?'text-red-700':'text-gray-800'" x-text="r.title"></p>
+                      <p class="text-xs text-gray-500" x-text="(r.lead_name||'') + ' · ' + (r.due_datetime||'').slice(0,16).replace('T',' ')"></p>
+                    </div>
+                    <button @click="doneReminder(r.id)" class="text-xs bg-green-500 text-white px-2 py-1 rounded-lg hover:bg-green-600">✓ Listo</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="flex flex-col sm:flex-row gap-3">
+              <input x-model="search" placeholder="Buscar lead..." class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 w-full sm:w-48"/>
+              <select x-model="filterProject" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <option value="">Todos los proyectos</option>
+                <template x-for="p in projects" :key="p.id"><option :value="p.id" x-text="p.name"></option></template>
+              </select>
+              <select x-model="filterStage" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <option value="">Todas las etapas</option>
+                <template x-for="s in STAGES" :key="s.id"><option :value="s.id" x-text="s.label"></option></template>
+              </select>
+            </div>
+
+            <!-- Kanban pipeline -->
+            <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
+            <div x-show="!loading" class="overflow-x-auto pb-4">
+              <div class="flex gap-3 min-w-max">
+                <template x-for="col in stageColumns" :key="col.id">
+                  <div class="w-64 flex-shrink-0">
+                    <div class="flex items-center justify-between mb-2 px-1">
+                      <span class="text-xs font-semibold uppercase tracking-wide" :style="'color:'+col.color" x-text="col.label"></span>
+                      <span class="text-xs bg-gray-200 text-gray-600 rounded-full px-2 py-0.5" x-text="col.leads.length"></span>
+                    </div>
+                    <div class="space-y-2">
+                      <template x-for="lead in col.leads" :key="lead.id">
+                        <div @click="openLead(lead)" class="bg-white rounded-xl border border-gray-200 p-3 shadow-sm hover:shadow-md cursor-pointer transition-all">
+                          <div class="flex items-start justify-between gap-1 mb-2">
+                            <p class="font-medium text-sm leading-tight" x-text="lead.name"></p>
+                            <!-- Qualification dots -->
+                            <div class="flex gap-0.5 flex-shrink-0">
+                              <div class="w-2 h-2 rounded-full" :class="lead.tiene_dinero_separacion?'bg-green-500':'bg-gray-200'" title="Separación"></div>
+                              <div class="w-2 h-2 rounded-full" :class="lead.tiene_credito?'bg-green-500':'bg-gray-200'" title="Crédito"></div>
+                              <div class="w-2 h-2 rounded-full" :class="(lead.tiene_subsidio||lead.puede_cubrir_faltante)?'bg-green-500':'bg-gray-200'" title="Faltante/Subsidio"></div>
+                            </div>
+                          </div>
+                          <p x-show="lead.project_name" class="text-xs text-gray-500 mb-1">🏗️ <span x-text="lead.project_name"></span></p>
+                          <p x-show="lead.unit_number" class="text-xs text-gray-500">🏠 Unidad <span x-text="lead.unit_number"></span></p>
+                          <div class="flex items-center justify-between mt-2">
+                            <span x-show="lead.phone||lead.whatsapp" class="text-xs text-gray-400" x-text="(lead.whatsapp||lead.phone||'').slice(-10)"></span>
+                            <span x-show="lead.next_contact" class="text-xs" :class="isOverdue({due_datetime:lead.next_contact})?'text-red-500 font-medium':'text-gray-400'" x-text="(lead.next_contact||'').slice(0,10)"></span>
+                          </div>
+                        </div>
+                      </template>
+                      <p x-show="col.leads.length===0" class="text-xs text-gray-300 text-center py-4">Sin leads</p>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal formulario lead -->
+          <div x-show="showForm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div class="flex items-center justify-between p-5 border-b sticky top-0 bg-white">
+                <h2 class="font-semibold" x-text="editingLead?'Editar lead':'Nuevo lead'"></h2>
+                <button @click="showForm=false" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+              <form @submit.prevent="save()" class="p-5 space-y-4">
+                <!-- Info básica -->
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Nombre completo *</label><input x-model="form.name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label><input x-model="form.phone" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label><input x-model="form.whatsapp" placeholder="57300..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Email</label><input x-model="form.email" type="email" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Fuente</label>
+                    <select x-model="form.source" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <option value="directo">Directo</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="whatsapp">WhatsApp</option><option value="referido">Referido</option><option value="portal">Portal inmobiliario</option><option value="llamada">Llamada</option>
+                    </select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Proyecto</label>
+                    <select x-model="form.project_id" @change="onProjectChange()" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <option value="">Sin proyecto</option>
+                      <template x-for="p in projects" :key="p.id"><option :value="p.id" x-text="p.name"></option></template>
+                    </select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Unidad de interés</label>
+                    <select x-model="form.unit_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <option value="">Sin asignar</option>
+                      <template x-for="u in units" :key="u.id"><option :value="u.id" x-text="'Unidad '+u.unit_number+' - $'+fmt(u.price)"></option></template>
+                    </select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Etapa</label>
+                    <select x-model="form.stage" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <template x-for="s in STAGES" :key="s.id"><option :value="s.id" x-text="s.label"></option></template>
+                    </select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Asignar a</label>
+                    <select x-model="form.assigned_to" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <option value="">Sin asignar</option>
+                      <template x-for="u in team" :key="u.id"><option :value="u.id" x-text="u.name"></option></template>
+                    </select>
+                  </div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Próximo contacto</label><input x-model="form.next_contact" type="datetime-local" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                  <div><label class="block text-sm font-medium text-gray-700 mb-1">Presupuesto cliente</label><input x-model="form.budget" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/></div>
+                </div>
+
+                <!-- Cualificación financiera -->
+                <div class="border border-green-200 bg-green-50 rounded-xl p-4 space-y-3">
+                  <h3 class="font-semibold text-green-800 text-sm">✅ Cualificación financiera</h3>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" x-model="form.tiene_dinero_separacion" class="w-4 h-4 accent-green-600"/>
+                    <span class="text-sm">Tiene dinero para cuota de separación/reserva</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" x-model="form.tiene_credito" class="w-4 h-4 accent-green-600"/>
+                    <span class="text-sm">Tiene crédito hipotecario aprobado o puede acceder a uno</span>
+                  </label>
+                  <div x-show="form.tiene_credito" class="ml-6">
+                    <input x-model="form.tipo_credito" placeholder="Tipo: hipotecario, leasing, VIS..." class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"/>
+                  </div>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" x-model="form.tiene_subsidio" class="w-4 h-4 accent-green-600"/>
+                    <span class="text-sm">Tiene subsidio de caja de compensación familiar</span>
+                  </label>
+                  <div x-show="form.tiene_subsidio" class="ml-6">
+                    <input x-model="form.caja_compensacion" placeholder="¿Cuál caja? Ej: Comfenalco, Cafam..." class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"/>
+                  </div>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" x-model="form.puede_cubrir_faltante" class="w-4 h-4 accent-green-600"/>
+                    <span class="text-sm">Puede cubrir el faltante entre crédito y precio</span>
+                  </label>
+                </div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea x-model="form.notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea></div>
+                <div class="flex gap-3 pt-2">
+                  <button type="button" @click="showForm=false" class="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50">Cancelar</button>
+                  <button type="submit" class="flex-1 bg-orange-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600">Guardar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Panel detalle lead -->
+          <template x-if="selectedLead">
+            <div class="fixed inset-0 z-50 flex justify-end bg-black/40" @click.self="closeLead()">
+              <div class="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl flex flex-col">
+                <div class="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between z-10">
+                  <div>
+                    <h2 class="font-bold text-lg" x-text="selectedLead.name"></h2>
+                    <span class="badge" :style="stageBadge(selectedLead.stage)" x-text="stageLabel(selectedLead.stage)"></span>
+                  </div>
+                  <div class="flex gap-2">
+                    <button @click="openEdit(selectedLead)" class="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">✏️ Editar</button>
+                    <button @click="closeLead()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                  </div>
+                </div>
+                <div class="flex-1 p-5 space-y-5" x-show="!detailLoading">
+                  <!-- Info básica -->
+                  <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div x-show="selectedLead.phone"><p class="text-xs text-gray-400">Teléfono</p><p x-text="selectedLead.phone"></p></div>
+                    <div x-show="selectedLead.whatsapp">
+                      <p class="text-xs text-gray-400">WhatsApp</p>
+                      <a :href="waLink(selectedLead)" target="_blank" class="text-green-600 hover:underline" x-text="selectedLead.whatsapp"></a>
+                    </div>
+                    <div x-show="selectedLead.email"><p class="text-xs text-gray-400">Email</p><p x-text="selectedLead.email"></p></div>
+                    <div x-show="selectedLead.project_name"><p class="text-xs text-gray-400">Proyecto</p><p x-text="selectedLead.project_name"></p></div>
+                    <div x-show="leadDetail?.unit_number"><p class="text-xs text-gray-400">Unidad</p><p x-text="'# '+leadDetail?.unit_number+' · '+fmt(leadDetail?.unit_price)"></p></div>
+                    <div x-show="selectedLead.assigned_name"><p class="text-xs text-gray-400">Asesor</p><p x-text="selectedLead.assigned_name"></p></div>
+                    <div x-show="selectedLead.next_contact">
+                      <p class="text-xs text-gray-400">Próximo contacto</p>
+                      <p :class="isOverdue({due_datetime:selectedLead.next_contact})?'text-red-600 font-medium':''" x-text="(selectedLead.next_contact||'').slice(0,16).replace('T',' ')"></p>
+                    </div>
+                    <div x-show="selectedLead.budget"><p class="text-xs text-gray-400">Presupuesto</p><p x-text="fmt(selectedLead.budget)"></p></div>
+                  </div>
+
+                  <!-- Cambiar etapa rápido -->
+                  <div>
+                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Mover a etapa</p>
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="s in STAGES" :key="s.id">
+                        <button @click="moveStage(selectedLead, s.id)"
+                          :class="selectedLead.stage===s.id ? 'ring-2 ring-offset-1' : 'opacity-60 hover:opacity-100'"
+                          class="text-xs px-2.5 py-1 rounded-full font-medium transition-all"
+                          :style="stageBadge(s.id)" x-text="s.label"></button>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Cualificación -->
+                  <div class="bg-gray-50 rounded-xl p-4">
+                    <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Cualificación financiera</p>
+                    <div class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs" :class="selectedLead.tiene_dinero_separacion?'bg-green-500 text-white':'bg-gray-200 text-gray-400'">
+                          <span x-text="selectedLead.tiene_dinero_separacion?'✓':'·'"></span>
+                        </div>
+                        <span class="text-sm" :class="selectedLead.tiene_dinero_separacion?'text-green-700':'text-gray-500'">Dinero para separación</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs" :class="selectedLead.tiene_credito?'bg-green-500 text-white':'bg-gray-200 text-gray-400'">
+                          <span x-text="selectedLead.tiene_credito?'✓':'·'"></span>
+                        </div>
+                        <span class="text-sm" :class="selectedLead.tiene_credito?'text-green-700':'text-gray-500'">Crédito hipotecario <span x-show="selectedLead.tipo_credito" class="text-xs text-gray-400" x-text="'('+selectedLead.tipo_credito+')'"></span></span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs" :class="selectedLead.tiene_subsidio?'bg-green-500 text-white':'bg-gray-200 text-gray-400'">
+                          <span x-text="selectedLead.tiene_subsidio?'✓':'·'"></span>
+                        </div>
+                        <span class="text-sm" :class="selectedLead.tiene_subsidio?'text-green-700':'text-gray-500'">Subsidio <span x-show="selectedLead.caja_compensacion" class="text-xs text-gray-400" x-text="'('+selectedLead.caja_compensacion+')'"></span></span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <div class="w-5 h-5 rounded-full flex items-center justify-center text-xs" :class="selectedLead.puede_cubrir_faltante?'bg-green-500 text-white':'bg-gray-200 text-gray-400'">
+                          <span x-text="selectedLead.puede_cubrir_faltante?'✓':'·'"></span>
+                        </div>
+                        <span class="text-sm" :class="selectedLead.puede_cubrir_faltante?'text-green-700':'text-gray-500'">Puede cubrir el faltante</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Alarmas del lead -->
+                  <div>
+                    <div class="flex items-center justify-between mb-2">
+                      <p class="text-xs font-semibold text-gray-500 uppercase">🔔 Alarmas de seguimiento</p>
+                    </div>
+                    <div class="space-y-1 mb-3">
+                      <template x-for="r in leadDetail?.reminders||[]" :key="r.id">
+                        <div class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <div>
+                            <p class="text-sm font-medium" x-text="r.title"></p>
+                            <p class="text-xs text-gray-500" x-text="(r.due_datetime||'').slice(0,16).replace('T',' ')"></p>
+                          </div>
+                          <button @click="doneReminder(r.id)" class="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600">✓</button>
+                        </div>
+                      </template>
+                    </div>
+                    <!-- Nueva alarma -->
+                    <div class="bg-gray-50 rounded-lg p-3 space-y-2">
+                      <input x-model="newReminder.title" placeholder="Título de la alarma..." class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                      <input x-model="newReminder.due_datetime" type="datetime-local" class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                      <button @click="addReminder()" class="w-full bg-orange-500 text-white py-1.5 rounded-lg text-sm font-medium hover:bg-orange-600">+ Agregar alarma</button>
+                    </div>
+                  </div>
+
+                  <!-- Actividad -->
+                  <div>
+                    <p class="text-xs font-semibold text-gray-500 uppercase mb-2">📋 Actividad</p>
+                    <!-- Nueva actividad -->
+                    <div class="bg-gray-50 rounded-lg p-3 space-y-2 mb-3">
+                      <div class="flex gap-2">
+                        <select x-model="newActivity.type" class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500">
+                          <option value="nota">📝 Nota</option>
+                          <option value="llamada">📞 Llamada</option>
+                          <option value="whatsapp">💬 WhatsApp</option>
+                          <option value="email">✉️ Email</option>
+                          <option value="visita">🏠 Visita</option>
+                        </select>
+                        <input x-model="newActivity.description" @keydown.enter="addActivity()" placeholder="Registrar actividad..." class="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                        <button @click="addActivity()" class="bg-orange-500 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-orange-600">+</button>
+                      </div>
+                    </div>
+                    <!-- Timeline -->
+                    <div class="space-y-2 max-h-64 overflow-y-auto">
+                      <template x-for="a in leadDetail?.activities||[]" :key="a.id">
+                        <div class="flex gap-2 text-sm">
+                          <span class="text-base flex-shrink-0" x-text="activityIcon(a.type)"></span>
+                          <div class="flex-1 min-w-0">
+                            <p class="text-gray-800" x-text="a.description"></p>
+                            <p class="text-xs text-gray-400" x-text="(a.user_name||'Sistema')+' · '+(a.created_at||'').slice(0,16).replace('T',' ')"></p>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <div x-show="detailLoading" class="flex-1 flex items-center justify-center text-gray-400">Cargando...</div>
+              </div>
+            </div>
+          </template>
         </div>
       </template>
 

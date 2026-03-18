@@ -542,6 +542,340 @@ def import_template():
                     headers={'Content-Disposition': 'attachment;filename=plantilla_clientes.csv'})
 
 
+# ─── Units ────────────────────────────────────────────────────────────────────
+
+@app.route('/api/projects/<int:pid>/units', methods=['GET', 'POST'])
+@require_auth
+def project_units(pid):
+    if request.method == 'GET':
+        data = rows(db().execute('''
+            SELECT u.*,
+              (SELECT COUNT(*) FROM leads l WHERE l.unit_id=u.id AND l.stage NOT IN ("perdido")) as interested_count
+            FROM units u WHERE u.project_id=? ORDER BY u.unit_number''', (pid,)))
+        return jsonify(data)
+    d = request.get_json()
+    c = db().execute(
+        'INSERT INTO units (project_id,unit_number,floor,area_m2,bedrooms,bathrooms,price,status,notes) VALUES (?,?,?,?,?,?,?,?,?)',
+        (pid, d.get('unit_number'), d.get('floor'), d.get('area_m2'), d.get('bedrooms', 2),
+         d.get('bathrooms', 1), d.get('price'), d.get('status', 'disponible'), d.get('notes')))
+    db().commit()
+    return jsonify(id=c.lastrowid, **d)
+
+@app.route('/api/units/<int:uid>', methods=['PUT', 'DELETE'])
+@require_auth
+def unit_detail(uid):
+    if request.method == 'PUT':
+        d = request.get_json()
+        db().execute('UPDATE units SET unit_number=?,floor=?,area_m2=?,bedrooms=?,bathrooms=?,price=?,status=?,notes=? WHERE id=?',
+                     (d.get('unit_number'), d.get('floor'), d.get('area_m2'), d.get('bedrooms'),
+                      d.get('bathrooms'), d.get('price'), d.get('status'), d.get('notes'), uid))
+        db().commit()
+        return jsonify(success=True)
+    db().execute('DELETE FROM units WHERE id=?', (uid,))
+    db().commit()
+    return jsonify(success=True)
+
+# ─── Leads / Pipeline ─────────────────────────────────────────────────────────
+
+LEAD_STAGES = ['nuevo', 'contactado', 'seguimiento', 'visita', 'calificacion', 'negociacion', 'separacion', 'escriturado', 'perdido']
+
+@app.route('/api/leads', methods=['GET', 'POST'])
+@require_auth
+def leads():
+    if request.method == 'GET':
+        project_id = request.args.get('project_id')
+        q = '''SELECT l.*, p.name as project_name, u.unit_number,
+                      tm.name as assigned_name,
+                      (SELECT COUNT(*) FROM lead_activities a WHERE a.lead_id=l.id) as activity_count
+               FROM leads l
+               LEFT JOIN projects p ON l.project_id=p.id
+               LEFT JOIN units u ON l.unit_id=u.id
+               LEFT JOIN users tm ON l.assigned_to=tm.id
+               WHERE 1=1'''
+        params = []
+        if project_id:
+            q += ' AND l.project_id=?'
+            params.append(project_id)
+        q += ' ORDER BY l.created_at DESC'
+        return jsonify(rows(db().execute(q, params)))
+    d = request.get_json()
+    if not d.get('name'):
+        return jsonify(error='Nombre requerido'), 400
+    c = db().execute('''INSERT INTO leads
+        (project_id,unit_id,name,phone,whatsapp,email,stage,source,
+         tiene_dinero_separacion,tiene_credito,tipo_credito,tiene_subsidio,
+         caja_compensacion,puede_cubrir_faltante,budget,next_contact,notes,
+         assigned_to,created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (d.get('project_id'), d.get('unit_id'), d['name'], d.get('phone'), d.get('whatsapp'),
+         d.get('email'), d.get('stage', 'nuevo'), d.get('source', 'directo'),
+         int(d.get('tiene_dinero_separacion', 0)), int(d.get('tiene_credito', 0)),
+         d.get('tipo_credito'), int(d.get('tiene_subsidio', 0)),
+         d.get('caja_compensacion'), int(d.get('puede_cubrir_faltante', 0)),
+         d.get('budget'), d.get('next_contact'), d.get('notes'),
+         d.get('assigned_to') or None, g.user['id']))
+    db().commit()
+    lid = c.lastrowid
+    db().execute("INSERT INTO lead_activities (lead_id,type,description,user_id) VALUES (?,?,?,?)",
+                 (lid, 'nota', f"Lead creado. Fuente: {d.get('source', 'directo')}", g.user['id']))
+    db().commit()
+    log_activity(f"Lead \"{d['name']}\" creado", 'lead', lid, g.user['id'])
+    return jsonify(id=lid, **d)
+
+@app.route('/api/leads/<int:lid>', methods=['GET', 'PUT', 'DELETE'])
+@require_auth
+def lead_detail(lid):
+    if request.method == 'GET':
+        l = row(db().execute('''SELECT l.*, p.name as project_name, u.unit_number, u.price as unit_price,
+                                       tm.name as assigned_name
+                                FROM leads l LEFT JOIN projects p ON l.project_id=p.id
+                                LEFT JOIN units u ON l.unit_id=u.id
+                                LEFT JOIN users tm ON l.assigned_to=tm.id
+                                WHERE l.id=?''', (lid,)))
+        if not l:
+            return jsonify(error='No encontrado'), 404
+        l['activities'] = rows(db().execute('''SELECT a.*, u.name as user_name FROM lead_activities a
+                                               LEFT JOIN users u ON a.user_id=u.id
+                                               WHERE a.lead_id=? ORDER BY a.created_at DESC''', (lid,)))
+        l['reminders'] = rows(db().execute('SELECT * FROM reminders WHERE lead_id=? AND done=0 ORDER BY due_datetime', (lid,)))
+        return jsonify(l)
+    if request.method == 'PUT':
+        d = request.get_json()
+        old = row(db().execute('SELECT stage FROM leads WHERE id=?', (lid,)))
+        db().execute('''UPDATE leads SET project_id=?,unit_id=?,name=?,phone=?,whatsapp=?,email=?,
+                        stage=?,source=?,tiene_dinero_separacion=?,tiene_credito=?,tipo_credito=?,
+                        tiene_subsidio=?,caja_compensacion=?,puede_cubrir_faltante=?,budget=?,
+                        next_contact=?,notes=?,assigned_to=?,last_contact=datetime('now') WHERE id=?''',
+                     (d.get('project_id'), d.get('unit_id') or None, d.get('name'), d.get('phone'),
+                      d.get('whatsapp'), d.get('email'), d.get('stage'), d.get('source'),
+                      int(d.get('tiene_dinero_separacion', 0)), int(d.get('tiene_credito', 0)),
+                      d.get('tipo_credito'), int(d.get('tiene_subsidio', 0)),
+                      d.get('caja_compensacion'), int(d.get('puede_cubrir_faltante', 0)),
+                      d.get('budget'), d.get('next_contact'), d.get('notes'),
+                      d.get('assigned_to') or None, lid))
+        # If unit is being sold/reserved update unit status
+        if d.get('stage') == 'separacion' and d.get('unit_id'):
+            db().execute("UPDATE units SET status='reservado' WHERE id=?", (d.get('unit_id'),))
+        if d.get('stage') == 'escriturado' and d.get('unit_id'):
+            db().execute("UPDATE units SET status='vendido' WHERE id=?", (d.get('unit_id'),))
+        if old and old['stage'] != d.get('stage'):
+            db().execute("INSERT INTO lead_activities (lead_id,type,description,user_id) VALUES (?,?,?,?)",
+                         (lid, 'etapa', f"Etapa cambiada: {old['stage']} → {d.get('stage')}", g.user['id']))
+        db().commit()
+        return jsonify(success=True)
+    db().execute('DELETE FROM lead_activities WHERE lead_id=?', (lid,))
+    db().execute('DELETE FROM leads WHERE id=?', (lid,))
+    db().commit()
+    return jsonify(success=True)
+
+@app.route('/api/leads/<int:lid>/activities', methods=['POST'])
+@require_auth
+def lead_add_activity(lid):
+    d = request.get_json()
+    db().execute("INSERT INTO lead_activities (lead_id,type,description,user_id) VALUES (?,?,?,?)",
+                 (lid, d.get('type', 'nota'), d.get('description', ''), g.user['id']))
+    db().commit()
+    return jsonify(success=True)
+
+# ─── Reminders ────────────────────────────────────────────────────────────────
+
+@app.route('/api/reminders', methods=['GET', 'POST'])
+@require_auth
+def reminders():
+    if request.method == 'GET':
+        uid = g.user['id']
+        data = rows(db().execute('''SELECT r.*, l.name as lead_name FROM reminders r
+                                    LEFT JOIN leads l ON r.lead_id=l.id
+                                    WHERE r.user_id=? AND r.done=0
+                                    ORDER BY r.due_datetime''', (uid,)))
+        return jsonify(data)
+    d = request.get_json()
+    db().execute('INSERT INTO reminders (lead_id,user_id,title,description,due_datetime) VALUES (?,?,?,?,?)',
+                 (d.get('lead_id'), g.user['id'], d.get('title'), d.get('description'), d.get('due_datetime')))
+    db().commit()
+    return jsonify(success=True)
+
+@app.route('/api/reminders/<int:rid>', methods=['PUT'])
+@require_auth
+def reminder_done(rid):
+    db().execute('UPDATE reminders SET done=1 WHERE id=?', (rid,))
+    db().commit()
+    return jsonify(success=True)
+
+# ─── AI WhatsApp Agent ────────────────────────────────────────────────────────
+
+def get_ai_config():
+    cfg = get_wa_config()
+    ai_key = db().execute("SELECT auth_token FROM whatsapp_config WHERE id=1").fetchone()
+    return cfg
+
+@app.route('/api/whatsapp/ai-webhook', methods=['POST'])
+def ai_whatsapp_webhook():
+    """Webhook de Twilio que procesa mensajes con IA"""
+    from_number = request.form.get('From', '').replace('whatsapp:', '')
+    body = request.form.get('Body', '').strip()
+    sid = request.form.get('MessageSid', '')
+    if not body:
+        return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
+
+    clean_num = re.sub(r'\D', '', from_number)
+
+    # Buscar lead por whatsapp
+    lead = row(db().execute(
+        "SELECT l.*, p.name as project_name FROM leads l LEFT JOIN projects p ON l.project_id=p.id WHERE REPLACE(REPLACE(l.whatsapp,' ',''),'+','')=? OR REPLACE(REPLACE(l.phone,' ',''),'+','')=?",
+        (clean_num, clean_num)))
+
+    # Si no existe, crear lead nuevo
+    if not lead:
+        c = db().execute("INSERT INTO leads (name,whatsapp,stage,source,ai_active,created_by) VALUES (?,?,?,?,?,1)",
+                         (f"Lead WA {from_number[-4:]}", from_number, 'nuevo', 'whatsapp', 1))
+        db().commit()
+        lead_id = c.lastrowid
+        lead = row(db().execute("SELECT * FROM leads WHERE id=?", (lead_id,)))
+    else:
+        lead_id = lead['id']
+
+    # Guardar mensaje entrante
+    db().execute("INSERT INTO whatsapp_messages (client_id,direction,from_number,body,status,twilio_sid) VALUES (?,?,?,?,?,?)",
+                 (lead_id, 'inbound', from_number, body, 'received', sid))
+    db().execute("INSERT INTO lead_activities (lead_id,type,description) VALUES (?,?,?)",
+                 (lead_id, 'whatsapp', f"Entrante: {body[:100]}"))
+    db().execute("UPDATE leads SET last_contact=datetime('now') WHERE id=?", (lead_id,))
+    db().commit()
+
+    # Generar respuesta con IA
+    ai_key = None
+    ai_cfg = db().execute("SELECT * FROM whatsapp_config WHERE id=1").fetchone()
+    if ai_cfg:
+        ai_cfg = dict(ai_cfg)
+        ai_key = ai_cfg.get('anthropic_key')
+
+    reply = None
+    if ai_key:
+        try:
+            reply = generate_ai_reply(lead, body, ai_key)
+        except Exception as e:
+            reply = None
+
+    if reply:
+        # Enviar respuesta via Twilio
+        wa_cfg = get_wa_config()
+        if wa_cfg.get('account_sid') and wa_cfg.get('auth_token'):
+            try:
+                from twilio.rest import Client as TwilioClient
+                tw = TwilioClient(wa_cfg['account_sid'], wa_cfg['auth_token'])
+                to_wa = 'whatsapp:' + from_number
+                from_wa = 'whatsapp:' + wa_cfg['from_number']
+                msg = tw.messages.create(body=reply, from_=from_wa, to=to_wa)
+                db().execute("INSERT INTO whatsapp_messages (client_id,direction,from_number,to_number,body,status,twilio_sid) VALUES (?,?,?,?,?,?,?)",
+                             (lead_id, 'outbound', wa_cfg['from_number'], from_number, reply, 'sent', msg.sid))
+                db().execute("INSERT INTO lead_activities (lead_id,type,description) VALUES (?,?,?)",
+                             (lead_id, 'ai_whatsapp', f"IA respondio: {reply[:100]}"))
+                db().commit()
+            except Exception as e:
+                pass
+    return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
+
+
+def generate_ai_reply(lead, user_message, api_key):
+    """Genera respuesta usando Claude - califica al lead naturalmente"""
+    import anthropic as ant
+
+    # Cargar historial de conversación reciente
+    msgs = rows(db().execute("""SELECT direction, body FROM whatsapp_messages
+                                WHERE client_id=? ORDER BY created_at DESC LIMIT 20""", (lead['id'],)))
+    msgs.reverse()
+
+    # Cargar proyectos disponibles con unidades
+    projects_info = rows(db().execute("""
+        SELECT p.name, p.location, p.description,
+               COUNT(u.id) as total_units,
+               SUM(CASE WHEN u.status='disponible' THEN 1 ELSE 0 END) as available_units,
+               MIN(u.price) as min_price, MAX(u.price) as max_price,
+               GROUP_CONCAT(u.bedrooms || 'hab $' || COALESCE(u.price,'?'), ' | ') as unit_types
+        FROM projects p LEFT JOIN units u ON u.project_id=p.id
+        WHERE p.status IN ('cotizacion','en_proceso')
+        GROUP BY p.id"""))
+
+    projects_text = ""
+    for p in projects_info:
+        projects_text += f"\n- {p['name']} en {p.get('location', '')}: {p.get('available_units', 0)} unidades disponibles, precios desde ${p.get('min_price', '?')} hasta ${p.get('max_price', '?')}. {p.get('description', '')}"
+
+    # Estado actual del lead
+    qual_status = []
+    if lead.get('tiene_dinero_separacion'): qual_status.append("Tiene dinero para separacion")
+    if lead.get('tiene_credito'): qual_status.append("Tiene/puede acceder a credito hipotecario")
+    if lead.get('tiene_subsidio'): qual_status.append("Tiene subsidio de caja de compensacion")
+    if lead.get('puede_cubrir_faltante'): qual_status.append("Puede cubrir el faltante")
+
+    system_prompt = f"""Eres un asesor inmobiliario amigable y profesional de una constructora. Tu nombre es Sofia.
+Tu objetivo es ayudar a las personas a encontrar su hogar ideal y cualificarlos como compradores potenciales.
+
+PROYECTOS DISPONIBLES:{projects_text if projects_text else " (No hay proyectos disponibles en este momento)"}
+
+INFORMACION DEL LEAD:
+- Nombre: {lead.get('name', 'Cliente')}
+- Etapa actual: {lead.get('stage', 'nuevo')}
+- Cualificacion: {', '.join(qual_status) if qual_status else 'Sin cualificar aun'}
+
+INSTRUCCIONES:
+1. Responde de manera natural, calida y en espanol colombiano.
+2. Presenta los proyectos de forma atractiva cuando sea relevante.
+3. A lo largo de la conversacion, trata de identificar NATURALMENTE (sin ser invasivo):
+   - Si tienen listo el dinero para la cuota de separacion/reserva
+   - Si ya tienen un credito hipotecario aprobado o si pueden acceder a uno
+   - Si cuentan con subsidio de caja de compensacion familiar
+   - Si pueden cubrir la diferencia entre el credito y el precio
+4. Cuando identifiques informacion financiera, responde con [QUAL:campo=valor] al FINAL del mensaje (el sistema lo procesara, no lo mostrara al cliente):
+   - [QUAL:dinero_separacion=1] cuando confirmen tener cuota inicial/separacion
+   - [QUAL:credito=1] cuando confirmen tener o poder acceder a credito hipotecario
+   - [QUAL:subsidio=1] cuando confirmen tener subsidio de caja
+   - [QUAL:faltante=1] cuando confirmen poder cubrir el faltante
+5. Si el lead esta completamente cualificado (tiene todo), termina con [QUAL:listo=1]
+6. Mensajes cortos y conversacionales (maximo 3-4 lineas).
+7. NO menciones precios exactos a menos que te los pregunten directamente."""
+
+    # Construir historial
+    history = []
+    for m in msgs[-10:]:
+        role = "user" if m['direction'] == 'inbound' else "assistant"
+        history.append({"role": role, "content": m['body']})
+
+    # Agregar mensaje actual si no esta ya
+    if not history or history[-1]['content'] != user_message:
+        history.append({"role": "user", "content": user_message})
+
+    client = ant.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model="claude-haiku-20240307",
+        max_tokens=300,
+        system=system_prompt,
+        messages=history
+    )
+    reply_text = response.content[0].text
+
+    # Procesar tags de cualificacion
+    import re as _re
+    qual_tags = _re.findall(r'\[QUAL:(\w+)=(\w+)\]', reply_text)
+    for key, val in qual_tags:
+        if key == 'dinero_separacion' and val == '1':
+            db().execute("UPDATE leads SET tiene_dinero_separacion=1 WHERE id=?", (lead['id'],))
+        elif key == 'credito' and val == '1':
+            db().execute("UPDATE leads SET tiene_credito=1 WHERE id=?", (lead['id'],))
+        elif key == 'subsidio' and val == '1':
+            db().execute("UPDATE leads SET tiene_subsidio=1 WHERE id=?", (lead['id'],))
+        elif key == 'faltante' and val == '1':
+            db().execute("UPDATE leads SET puede_cubrir_faltante=1 WHERE id=?", (lead['id'],))
+        elif key == 'listo' and val == '1':
+            db().execute("UPDATE leads SET stage='calificacion' WHERE id=?", (lead['id'],))
+    if qual_tags:
+        db().commit()
+
+    # Remover tags del mensaje final
+    clean_reply = _re.sub(r'\[QUAL:[^\]]+\]', '', reply_text).strip()
+    return clean_reply
+
+
 # ─── WhatsApp ──────────────────────────────────────────────────────────────────
 
 def get_wa_config():
@@ -565,12 +899,13 @@ def whatsapp_config():
     if auth_token and '••' in auth_token:
         auth_token = existing.get('auth_token', '')  # keep existing
     if existing:
-        db().execute('''UPDATE whatsapp_config SET account_sid=?,auth_token=?,from_number=?,updated_at=datetime('now')
+        db().execute('''UPDATE whatsapp_config SET account_sid=?,auth_token=?,from_number=?,anthropic_key=?,updated_at=datetime('now')
                         WHERE id=1''',
-                     (d.get('account_sid'), auth_token or existing.get('auth_token'), d.get('from_number')))
+                     (d.get('account_sid'), auth_token or existing.get('auth_token'), d.get('from_number'),
+                      d.get('anthropic_key') or existing.get('anthropic_key')))
     else:
-        db().execute('''INSERT INTO whatsapp_config (id,account_sid,auth_token,from_number) VALUES (1,?,?,?)''',
-                     (d.get('account_sid'), auth_token, d.get('from_number')))
+        db().execute('''INSERT INTO whatsapp_config (id,account_sid,auth_token,from_number,anthropic_key) VALUES (1,?,?,?,?)''',
+                     (d.get('account_sid'), auth_token, d.get('from_number'), d.get('anthropic_key')))
     db().commit()
     return jsonify(success=True)
 

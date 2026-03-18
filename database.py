@@ -64,6 +64,7 @@ def init_db():
         account_sid TEXT,
         auth_token TEXT,
         from_number TEXT,
+        anthropic_key TEXT,
         webhook_url TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -106,6 +107,66 @@ def init_db():
         user_id INTEGER,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS units (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        unit_number TEXT NOT NULL,
+        floor INTEGER,
+        area_m2 REAL,
+        bedrooms INTEGER DEFAULT 2,
+        bathrooms INTEGER DEFAULT 1,
+        price REAL,
+        status TEXT DEFAULT 'disponible',
+        notes TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        unit_id INTEGER,
+        name TEXT NOT NULL,
+        phone TEXT,
+        whatsapp TEXT,
+        email TEXT,
+        stage TEXT DEFAULT 'nuevo',
+        source TEXT DEFAULT 'directo',
+        tiene_dinero_separacion INTEGER DEFAULT 0,
+        tiene_credito INTEGER DEFAULT 0,
+        tipo_credito TEXT,
+        tiene_subsidio INTEGER DEFAULT 0,
+        caja_compensacion TEXT,
+        puede_cubrir_faltante INTEGER DEFAULT 0,
+        budget REAL,
+        last_contact TEXT,
+        next_contact TEXT,
+        notes TEXT,
+        ai_active INTEGER DEFAULT 0,
+        assigned_to INTEGER,
+        created_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS lead_activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id INTEGER NOT NULL,
+        type TEXT DEFAULT 'nota',
+        description TEXT NOT NULL,
+        user_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id INTEGER,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        due_datetime TEXT NOT NULL,
+        done INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
     """)
 
     # Seed admin user if DB is empty
@@ -144,7 +205,7 @@ def init_db():
     if 'whatsapp' not in existing_cols:
         c.execute("ALTER TABLE clients ADD COLUMN whatsapp TEXT")
 
-    # Crear tablas nuevas si no existen
+    # Crear tablas nuevas si no existen (legacy migration)
     c.executescript("""
     CREATE TABLE IF NOT EXISTS whatsapp_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,6 +227,15 @@ def init_db():
         updated_at TEXT
     );
     """)
+
+    # Migrar whatsapp_config para agregar anthropic_key si no existe
+    wa_cols = [r[1] for r in c.execute('PRAGMA table_info(whatsapp_config)').fetchall()]
+    if 'anthropic_key' not in wa_cols and wa_cols:
+        c.execute("ALTER TABLE whatsapp_config ADD COLUMN anthropic_key TEXT")
+
+    # Migrar leads si no existe tabla (las tablas se crean via executescript)
+    lead_tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    # (las tablas se crean via executescript, no necesita migración extra aquí)
 
     conn.commit()
     conn.close()

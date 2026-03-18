@@ -80,6 +80,7 @@ function crm() {
       { page: 'dashboard', icon: '📊', label: 'Dashboard' },
       { page: 'clients',   icon: '👥', label: 'Clientes' },
       { page: 'projects',  icon: '🏗️', label: 'Proyectos' },
+      { page: 'sales',     icon: '💰', label: 'Ventas' },
       { page: 'tasks',     icon: '✅', label: 'Tareas' },
       { page: 'team',      icon: '👷', label: 'Equipo' },
       { page: 'settings',  icon: '⚙️', label: 'Ajustes' },
@@ -252,7 +253,7 @@ function clientsPage() {
       return num ? `https://wa.me/${num}` : null;
     },
     waMessages: [], waLoading: false, waNew: '', waSending: false, waError: '',
-    waConfigOpen: false, waConfig: { account_sid: '', auth_token: '', from_number: '' },
+    waConfigOpen: false, waConfig: { account_sid: '', auth_token: '', from_number: '', anthropic_key: '' },
 
     async openWa(c) {
       this.waClient = c; this.waMessages = []; this.waLoading = true; this.waError = '';
@@ -411,6 +412,205 @@ function tasksPage() {
     async changeStatus(task, status) {
       await put('/tasks/' + task.id, { ...task, status });
       task.status = status;
+    }
+  };
+}
+
+// ─── Sales Pipeline / Leads ────────────────────────────────────────────────
+const STAGES = [
+  { id: 'nuevo',        label: 'Nuevo',         color: '#6b7280', bg: '#f3f4f6' },
+  { id: 'contactado',   label: 'Contactado',     color: '#2563eb', bg: '#dbeafe' },
+  { id: 'seguimiento',  label: 'Seguimiento',    color: '#7c3aed', bg: '#ede9fe' },
+  { id: 'visita',       label: 'Visita',         color: '#d97706', bg: '#fef3c7' },
+  { id: 'calificacion', label: 'Calificado',     color: '#059669', bg: '#d1fae5' },
+  { id: 'negociacion',  label: 'Negociación',    color: '#ea580c', bg: '#ffedd5' },
+  { id: 'separacion',   label: 'Separación',     color: '#16a34a', bg: '#dcfce7' },
+  { id: 'escriturado',  label: 'Escriturado 🎉', color: '#166534', bg: '#bbf7d0' },
+  { id: 'perdido',      label: 'Perdido',        color: '#991b1b', bg: '#fee2e2' },
+];
+function stageLabel(s) { return (STAGES.find(x=>x.id===s)||{label:s}).label; }
+function stageBadge(s) { const st = STAGES.find(x=>x.id===s)||{color:'#6b7280',bg:'#f3f4f6'}; return `background:${st.bg};color:${st.color}`; }
+function qualScore(lead) {
+  return [lead.tiene_dinero_separacion, lead.tiene_credito, lead.tiene_subsidio||lead.puede_cubrir_faltante].filter(Boolean).length;
+}
+
+function leadsPage() {
+  return {
+    leads: [], projects: [], team: [], units: [],
+    loading: true, filterProject: '', filterStage: '', search: '',
+    selectedLead: null, leadDetail: null, detailLoading: false,
+    showForm: false, editingLead: null,
+    form: {},
+    reminders: [], remindersOpen: false,
+    newReminder: { title: '', due_datetime: '', description: '' },
+    newActivity: { type: 'nota', description: '' },
+    STAGES,
+    stageLabel, stageBadge, qualScore, fmt,
+
+    get filteredLeads() {
+      return this.leads.filter(l => {
+        if (this.filterProject && l.project_id != this.filterProject) return false;
+        if (this.filterStage && l.stage !== this.filterStage) return false;
+        if (this.search) {
+          const s = this.search.toLowerCase();
+          if (!l.name.toLowerCase().includes(s) && !(l.phone||'').includes(s) && !(l.email||'').toLowerCase().includes(s)) return false;
+        }
+        return true;
+      });
+    },
+
+    get stageColumns() {
+      return STAGES.filter(s => s.id !== 'perdido').map(s => ({
+        ...s,
+        leads: this.filteredLeads.filter(l => l.stage === s.id)
+      }));
+    },
+
+    async init() {
+      this.loading = true;
+      const [leads, projects, team] = await Promise.all([get('/leads'), get('/projects'), get('/team')]);
+      this.leads = leads || [];
+      this.projects = projects || [];
+      this.team = team || [];
+      this.loading = false;
+      this.loadReminders();
+    },
+
+    async loadReminders() {
+      this.reminders = await get('/reminders') || [];
+    },
+
+    async loadDetail(id) {
+      this.detailLoading = true;
+      this.leadDetail = await get('/leads/' + id);
+      this.detailLoading = false;
+    },
+
+    async openLead(lead) {
+      this.selectedLead = lead;
+      await this.loadDetail(lead.id);
+      if (lead.project_id) {
+        this.units = await get('/projects/' + lead.project_id + '/units') || [];
+      }
+    },
+
+    closeLead() { this.selectedLead = null; this.leadDetail = null; },
+
+    openNew() {
+      this.editingLead = null;
+      this.form = { name:'', phone:'', whatsapp:'', email:'', project_id:'', unit_id:'', stage:'nuevo', source:'directo',
+        tiene_dinero_separacion:false, tiene_credito:false, tipo_credito:'', tiene_subsidio:false,
+        caja_compensacion:'', puede_cubrir_faltante:false, budget:'', next_contact:'', notes:'', assigned_to:'' };
+      this.showForm = true;
+    },
+
+    openEdit(lead) {
+      this.editingLead = lead;
+      this.form = { ...lead, tiene_dinero_separacion: !!lead.tiene_dinero_separacion,
+        tiene_credito: !!lead.tiene_credito, tiene_subsidio: !!lead.tiene_subsidio,
+        puede_cubrir_faltante: !!lead.puede_cubrir_faltante };
+      this.showForm = true;
+    },
+
+    async save() {
+      const payload = { ...this.form,
+        tiene_dinero_separacion: this.form.tiene_dinero_separacion ? 1 : 0,
+        tiene_credito: this.form.tiene_credito ? 1 : 0,
+        tiene_subsidio: this.form.tiene_subsidio ? 1 : 0,
+        puede_cubrir_faltante: this.form.puede_cubrir_faltante ? 1 : 0,
+      };
+      if (this.editingLead) await put('/leads/' + this.editingLead.id, payload);
+      else await post('/leads', payload);
+      this.showForm = false;
+      await this.init();
+      if (this.selectedLead) await this.loadDetail(this.selectedLead.id);
+    },
+
+    async moveStage(lead, stage) {
+      await put('/leads/' + lead.id, { ...lead, stage });
+      lead.stage = stage;
+      if (this.leadDetail && this.leadDetail.id === lead.id) {
+        this.leadDetail.stage = stage;
+        await this.loadDetail(lead.id);
+      }
+    },
+
+    async addActivity() {
+      if (!this.newActivity.description) return;
+      await post('/leads/' + this.selectedLead.id + '/activities', this.newActivity);
+      this.newActivity = { type: 'nota', description: '' };
+      await this.loadDetail(this.selectedLead.id);
+    },
+
+    async addReminder() {
+      if (!this.newReminder.title || !this.newReminder.due_datetime) return;
+      await post('/reminders', { ...this.newReminder, lead_id: this.selectedLead.id });
+      this.newReminder = { title: '', due_datetime: '', description: '' };
+      await this.loadDetail(this.selectedLead.id);
+      await this.loadReminders();
+    },
+
+    async doneReminder(id) {
+      await put('/reminders/' + id, {});
+      await this.loadReminders();
+      if (this.selectedLead) await this.loadDetail(this.selectedLead.id);
+    },
+
+    waLink(lead) {
+      const num = ((lead||{}).whatsapp || (lead||{}).phone || '').replace(/\D/g,'');
+      return num ? `https://wa.me/${num}` : null;
+    },
+
+    isOverdue(r) { return r.due_datetime && new Date(r.due_datetime) < new Date(); },
+
+    activityIcon(type) {
+      return { nota:'📝', llamada:'📞', whatsapp:'💬', email:'✉️', visita:'🏠', etapa:'🔄', ai_whatsapp:'🤖' }[type] || '📝';
+    },
+
+    async onProjectChange() {
+      if (this.form.project_id) {
+        this.units = await get('/projects/' + this.form.project_id + '/units') || [];
+      } else { this.units = []; }
+    },
+  };
+}
+
+// ─── Project Units ─────────────────────────────────────────────────────────────
+function projectUnits(pid) {
+  return {
+    units: [], loading: true, modal: false, editing: null,
+    form: {},
+    statusColors: { disponible:'bg-green-100 text-green-800', reservado:'bg-yellow-100 text-yellow-800', vendido:'bg-red-100 text-red-800' },
+    fmt,
+    async init() { await this.load(); },
+    async load() {
+      this.loading = true;
+      this.units = await get('/projects/' + pid + '/units') || [];
+      this.loading = false;
+    },
+    openNew() {
+      this.editing = null;
+      this.form = { unit_number:'', floor:'', area_m2:'', bedrooms:2, bathrooms:1, price:'', status:'disponible', notes:'' };
+      this.modal = true;
+    },
+    openEdit(u) { this.editing = u; this.form = {...u}; this.modal = true; },
+    async save() {
+      if (this.editing) await put('/units/' + this.editing.id, this.form);
+      else await post('/projects/' + pid + '/units', this.form);
+      await this.load();
+      this.modal = false;
+    },
+    async del(id) {
+      if (!confirm('¿Eliminar esta unidad?')) return;
+      await del('/units/' + id);
+      await this.load();
+    },
+    summary() {
+      const total = this.units.length;
+      const disp = this.units.filter(u=>u.status==='disponible').length;
+      const res = this.units.filter(u=>u.status==='reservado').length;
+      const vend = this.units.filter(u=>u.status==='vendido').length;
+      return { total, disp, res, vend };
     }
   };
 }
