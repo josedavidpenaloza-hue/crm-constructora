@@ -346,6 +346,7 @@ function projectDetailPage(pid) {
     // ── Units (merged to avoid nested x-data with null project reference) ──
     units: [], unitsLoading: false, unitModal: false, editingUnit: null, unitForm: {},
     unitStatusColors: { disponible: 'bg-green-100 text-green-800', reservado: 'bg-yellow-100 text-yellow-800', vendido: 'bg-red-100 text-red-800' },
+    unitSaving: false, unitError: '',
     fmt, statusLabel, statusStyle, priorityLabel, priorityStyle,
     tasksByStatus(s) { return (this.project?.tasks || []).filter(t => t.status === s); },
     doneTasks() { return (this.project?.tasks || []).filter(t => t.status === 'completado').length; },
@@ -382,8 +383,13 @@ function projectDetailPage(pid) {
     },
     openEditUnit(u) { this.editingUnit = u; this.unitForm = { ...u }; this.unitModal = true; },
     async saveUnit() {
-      if (this.editingUnit) await put('/units/' + this.editingUnit.id, this.unitForm);
-      else await post('/projects/' + pid + '/units', this.unitForm);
+      if (!this.unitForm.unit_number) { this.unitError = 'El número de unidad es obligatorio'; return; }
+      this.unitSaving = true; this.unitError = '';
+      const data = this.editingUnit
+        ? await put('/units/' + this.editingUnit.id, this.unitForm)
+        : await post('/projects/' + pid + '/units', this.unitForm);
+      this.unitSaving = false;
+      if (!data || data.error) { this.unitError = (data && data.error) || 'Error al guardar. Intenta de nuevo.'; return; }
       await this.loadUnits();
       this.unitModal = false;
     },
