@@ -654,6 +654,71 @@
         </div>
       </template>
 
+      <!-- AJUSTES -->
+      <template x-if="page==='settings'">
+        <div x-data="settingsPage()">
+          <div class="max-w-2xl space-y-6">
+            <div>
+              <h1 class="text-2xl font-bold">Ajustes de cuenta</h1>
+              <p class="text-sm text-gray-500">Actualiza tu perfil y contraseña</p>
+            </div>
+
+            <!-- Perfil -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+              <div class="flex items-center gap-3 pb-3 border-b">
+                <div class="w-12 h-12 rounded-full bg-orange-500 flex items-center justify-center text-white text-xl font-bold" x-text="(profile.name||'?')[0].toUpperCase()"></div>
+                <div>
+                  <h2 class="font-semibold">Información personal</h2>
+                  <p class="text-xs text-gray-400">Nombre y correo electrónico</p>
+                </div>
+              </div>
+              <form @submit.prevent="saveProfile()" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Nombre completo</label>
+                  <input x-model="profile.name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Correo electrónico</label>
+                  <input x-model="profile.email" type="email" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div x-show="profileError" class="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" x-text="profileError"></div>
+                <div x-show="profileSaved" class="text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">✅ Perfil actualizado correctamente</div>
+                <button type="submit" :disabled="profileLoading" class="bg-orange-500 text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50">
+                  <span x-text="profileLoading ? 'Guardando...' : 'Guardar cambios'"></span>
+                </button>
+              </form>
+            </div>
+
+            <!-- Cambiar contraseña -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+              <div class="pb-3 border-b">
+                <h2 class="font-semibold">🔒 Cambiar contraseña</h2>
+                <p class="text-xs text-gray-400">Mínimo 6 caracteres</p>
+              </div>
+              <form @submit.prevent="savePassword()" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Contraseña actual</label>
+                  <input x-model="pw.current_password" type="password" required placeholder="••••••••" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Nueva contraseña</label>
+                  <input x-model="pw.new_password" type="password" required placeholder="••••••••" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Confirmar nueva contraseña</label>
+                  <input x-model="pw.confirm" type="password" required placeholder="••••••••" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div x-show="pwError" class="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" x-text="pwError"></div>
+                <div x-show="pwSaved" class="text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">✅ Contraseña actualizada correctamente</div>
+                <button type="submit" :disabled="pwLoading" class="bg-orange-500 text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 disabled:opacity-50">
+                  <span x-text="pwLoading ? 'Guardando...' : 'Cambiar contraseña'"></span>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </template>
+
       <!-- EQUIPO -->
       <template x-if="page==='team'">
         <div x-data="teamPage()">

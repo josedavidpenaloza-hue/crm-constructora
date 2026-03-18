@@ -139,5 +139,33 @@ def init_db():
         c.execute("INSERT INTO activities (type, description, entity_type, entity_id, user_id) VALUES (?, ?, ?, ?, 1)",
                   ('create', 'Sistema CRM iniciado', 'system', 0))
 
+    # ── Migraciones seguras (ALTER TABLE si la columna no existe) ──────────────
+    existing_cols = [r[1] for r in c.execute('PRAGMA table_info(clients)').fetchall()]
+    if 'whatsapp' not in existing_cols:
+        c.execute("ALTER TABLE clients ADD COLUMN whatsapp TEXT")
+
+    # Crear tablas nuevas si no existen
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER,
+        direction TEXT NOT NULL DEFAULT 'outbound',
+        from_number TEXT,
+        to_number TEXT,
+        body TEXT NOT NULL,
+        status TEXT DEFAULT 'sent',
+        twilio_sid TEXT,
+        user_id INTEGER,
+        created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS whatsapp_config (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        account_sid TEXT,
+        auth_token TEXT,
+        from_number TEXT,
+        updated_at TEXT
+    );
+    """)
+
     conn.commit()
     conn.close()

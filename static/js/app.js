@@ -82,11 +82,12 @@ function crm() {
       { page: 'projects',  icon: '🏗️', label: 'Proyectos' },
       { page: 'tasks',     icon: '✅', label: 'Tareas' },
       { page: 'team',      icon: '👷', label: 'Equipo' },
+      { page: 'settings',  icon: '⚙️', label: 'Ajustes' },
     ],
 
     init() {
-      // Expose logout for API helper
       window._crmLogout = () => { this.token = ''; this.user = null; };
+      window._crmUpdateUser = (token, user) => { this.token = token; this.user = user; };
       // Listen for child navigation events
       window.addEventListener('crm:navigate', e => {
         this.page = e.detail.page;
@@ -410,6 +411,69 @@ function tasksPage() {
     async changeStatus(task, status) {
       await put('/tasks/' + task.id, { ...task, status });
       task.status = status;
+    }
+  };
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function settingsPage() {
+  return {
+    // Perfil
+    profile: { name: '', email: '' },
+    profileLoading: false, profileSaved: false, profileError: '',
+
+    // Contraseña
+    pw: { current_password: '', new_password: '', confirm: '' },
+    pwLoading: false, pwSaved: false, pwError: '',
+
+    async init() {
+      const u = JSON.parse(localStorage.getItem('user') || 'null');
+      if (u) this.profile = { name: u.name, email: u.email };
+    },
+
+    async saveProfile() {
+      this.profileLoading = true; this.profileSaved = false; this.profileError = '';
+      const data = await api('PUT', '/auth/me', {
+        name: this.profile.name,
+        email: this.profile.email,
+      });
+      this.profileLoading = false;
+      if (data?.error) { this.profileError = data.error; return; }
+      // Actualizar localStorage y estado global
+      if (data?.token) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        window._crmUpdateUser && window._crmUpdateUser(data.token, data.user);
+      }
+      this.profileSaved = true;
+      setTimeout(() => this.profileSaved = false, 3000);
+    },
+
+    async savePassword() {
+      this.pwError = '';
+      if (this.pw.new_password !== this.pw.confirm) {
+        this.pwError = 'Las contraseñas nuevas no coinciden'; return;
+      }
+      if (this.pw.new_password.length < 6) {
+        this.pwError = 'La contraseña debe tener al menos 6 caracteres'; return;
+      }
+      this.pwLoading = true; this.pwSaved = false;
+      const data = await api('PUT', '/auth/me', {
+        name: this.profile.name,
+        email: this.profile.email,
+        current_password: this.pw.current_password,
+        new_password: this.pw.new_password,
+      });
+      this.pwLoading = false;
+      if (data?.error) { this.pwError = data.error; return; }
+      if (data?.token) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        window._crmUpdateUser && window._crmUpdateUser(data.token, data.user);
+      }
+      this.pw = { current_password: '', new_password: '', confirm: '' };
+      this.pwSaved = true;
+      setTimeout(() => this.pwSaved = false, 3000);
     }
   };
 }

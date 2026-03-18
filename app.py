@@ -129,6 +129,42 @@ def register():
         return jsonify(error='Email ya registrado'), 400
 
 
+# ─── Perfil propio ────────────────────────────────────────────────────────────
+
+@app.route('/api/auth/me', methods=['GET', 'PUT'])
+@require_auth
+def me():
+    uid = g.user['id']
+    if request.method == 'GET':
+        u = row(db().execute('SELECT id,name,email,role,created_at FROM users WHERE id=?', (uid,)))
+        return jsonify(u)
+    d = request.get_json()
+    name  = (d.get('name') or '').strip()
+    email = (d.get('email') or '').strip()
+    new_pw = d.get('new_password', '').strip()
+    cur_pw = d.get('current_password', '').strip()
+    if not name or not email:
+        return jsonify(error='Nombre y email son requeridos'), 400
+    # Verificar contraseña actual si quiere cambiarla
+    if new_pw:
+        if not cur_pw:
+            return jsonify(error='Ingresa tu contraseña actual'), 400
+        user_row = row(db().execute('SELECT password FROM users WHERE id=?', (uid,)))
+        if not bcrypt.checkpw(cur_pw.encode(), user_row['password'].encode()):
+            return jsonify(error='Contraseña actual incorrecta'), 400
+        hashed = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
+        db().execute('UPDATE users SET name=?,email=?,password=? WHERE id=?', (name, email, hashed, uid))
+    else:
+        db().execute('UPDATE users SET name=?,email=? WHERE id=?', (name, email, uid))
+    db().commit()
+    # Devolver token actualizado
+    token = jwt.encode(
+        {'id': uid, 'email': email, 'role': g.user['role'], 'name': name},
+        JWT_SECRET, algorithm='HS256'
+    )
+    return jsonify(success=True, token=token, user={'id': uid, 'name': name, 'email': email, 'role': g.user['role']})
+
+
 # ─── Dashboard ────────────────────────────────────────────────────────────────
 
 @app.route('/api/dashboard')
