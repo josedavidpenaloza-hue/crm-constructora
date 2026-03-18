@@ -358,8 +358,10 @@ def team_member(uid):
     return jsonify(success=True)
 
 
+# Inicializar DB y rutas SPA al importar el módulo (necesario para gunicorn)
+init_db()
+register_spa_route()
+
 if __name__ == '__main__':
-    init_db()
-    register_spa_route()
     port = int(os.environ.get('PORT', 8080))
     app.run(debug=False, port=port, host='0.0.0.0')
