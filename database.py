@@ -2,7 +2,10 @@ import sqlite3
 import bcrypt
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'crm.db')
+# En producción (Render) usa /data/crm.db (disco persistente montado)
+# En local usa el directorio del proyecto
+_data_dir = '/data' if os.path.isdir('/data') else os.path.dirname(__file__)
+DB_PATH = os.path.join(_data_dir, 'crm.db')
 
 
 def get_db():

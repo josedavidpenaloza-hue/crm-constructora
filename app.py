@@ -8,7 +8,7 @@ from database import get_db, init_db
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-JWT_SECRET = os.environ.get('JWT_SECRET', 'crm-constructora-secret-2026')
+JWT_SECRET = os.environ.get('SECRET_KEY', os.environ.get('JWT_SECRET', 'crm-constructora-secret-2026'))
 
 
 # ─── DB helpers ────────────────────────────────────────────────────────────────
