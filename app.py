@@ -3,6 +3,11 @@ import sqlite3
 import bcrypt
 import jwt
 import os
+import csv
+import io
+import re
+import json
+import urllib.request
 from functools import wraps
 from database import get_db, init_db
 
@@ -176,8 +181,8 @@ def clients():
     if not d.get('name'):
         return jsonify(error='Nombre requerido'), 400
     c = db().execute(
-        'INSERT INTO clients (name,email,phone,address,city,rfc,notes,created_by) VALUES (?,?,?,?,?,?,?,?)',
-        (d.get('name'), d.get('email'), d.get('phone'), d.get('address'),
+        'INSERT INTO clients (name,email,phone,whatsapp,address,city,rfc,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?)',
+        (d.get('name'), d.get('email'), d.get('phone'), d.get('whatsapp'), d.get('address'),
          d.get('city'), d.get('rfc'), d.get('notes'), g.user['id']))
     db().commit()
     log_activity(f"Cliente \"{d['name']}\" creado", 'client', c.lastrowid, g.user['id'])
@@ -196,8 +201,8 @@ def client_detail(cid):
         return jsonify(c)
     if request.method == 'PUT':
         d = request.get_json()
-        db().execute('UPDATE clients SET name=?,email=?,phone=?,address=?,city=?,rfc=?,notes=? WHERE id=?',
-                     (d.get('name'), d.get('email'), d.get('phone'), d.get('address'),
+        db().execute('UPDATE clients SET name=?,email=?,phone=?,whatsapp=?,address=?,city=?,rfc=?,notes=? WHERE id=?',
+                     (d.get('name'), d.get('email'), d.get('phone'), d.get('whatsapp'), d.get('address'),
                       d.get('city'), d.get('rfc'), d.get('notes'), cid))
         db().commit()
         log_activity(f"Cliente \"{d.get('name')}\" actualizado", 'client', cid, g.user['id'])
@@ -356,6 +361,237 @@ def team_member(uid):
     db().execute('UPDATE users SET active=0 WHERE id=?', (uid,))
     db().commit()
     return jsonify(success=True)
+
+
+# ─── Import clientes (Excel / CSV / Google Sheets) ────────────────────────────
+
+IMPORT_COLUMNS = {
+    'nombre': 'name', 'name': 'name', 'cliente': 'name', 'client': 'name',
+    'email': 'email', 'correo': 'email', 'e-mail': 'email',
+    'telefono': 'phone', 'teléfono': 'phone', 'phone': 'phone', 'tel': 'phone',
+    'whatsapp': 'whatsapp', 'ws': 'whatsapp', 'wa': 'whatsapp',
+    'ciudad': 'city', 'city': 'city',
+    'direccion': 'address', 'dirección': 'address', 'address': 'address',
+    'rfc': 'rfc',
+    'notas': 'notes', 'notes': 'notes', 'observaciones': 'notes',
+}
+
+def normalize_header(h):
+    return re.sub(r'[^a-z0-9]', '', h.lower().strip())
+
+def map_headers(headers):
+    mapping = {}
+    for i, h in enumerate(headers):
+        key = normalize_header(h)
+        if key in IMPORT_COLUMNS:
+            mapping[IMPORT_COLUMNS[key]] = i
+    return mapping
+
+def import_rows(rows_data, user_id):
+    imported = 0
+    skipped = 0
+    errors = []
+    d = db()
+    for idx, row_data in enumerate(rows_data):
+        name = (row_data.get('name') or '').strip()
+        if not name:
+            skipped += 1
+            continue
+        try:
+            existing = d.execute('SELECT id FROM clients WHERE name=?', (name,)).fetchone()
+            if existing:
+                # Update whatsapp/phone if missing
+                d.execute('''UPDATE clients SET
+                    phone=COALESCE(NULLIF(phone,''), ?),
+                    whatsapp=COALESCE(NULLIF(whatsapp,''), ?),
+                    email=COALESCE(NULLIF(email,''), ?),
+                    city=COALESCE(NULLIF(city,''), ?)
+                    WHERE id=?''',
+                    (row_data.get('phone'), row_data.get('whatsapp'),
+                     row_data.get('email'), row_data.get('city'), existing['id']))
+                skipped += 1
+            else:
+                d.execute('''INSERT INTO clients (name,email,phone,whatsapp,address,city,rfc,notes,created_by)
+                             VALUES (?,?,?,?,?,?,?,?,?)''',
+                          (name, row_data.get('email'), row_data.get('phone'),
+                           row_data.get('whatsapp'), row_data.get('address'),
+                           row_data.get('city'), row_data.get('rfc'),
+                           row_data.get('notes'), user_id))
+                imported += 1
+        except Exception as e:
+            errors.append(f'Fila {idx+2}: {str(e)}')
+    d.commit()
+    return imported, skipped, errors
+
+def parse_csv_data(text):
+    reader = csv.reader(io.StringIO(text))
+    rows_list = list(reader)
+    if not rows_list:
+        return []
+    headers = rows_list[0]
+    mapping = map_headers(headers)
+    result = []
+    for row_vals in rows_list[1:]:
+        item = {}
+        for field, idx in mapping.items():
+            item[field] = row_vals[idx].strip() if idx < len(row_vals) else ''
+        result.append(item)
+    return result
+
+def parse_xlsx_data(file_bytes):
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    ws = wb.active
+    rows_iter = iter(ws.rows)
+    headers = [str(cell.value or '').strip() for cell in next(rows_iter)]
+    mapping = map_headers(headers)
+    result = []
+    for row_vals in rows_iter:
+        item = {}
+        for field, idx in mapping.items():
+            val = row_vals[idx].value if idx < len(row_vals) else None
+            item[field] = str(val).strip() if val is not None else ''
+        result.append(item)
+    wb.close()
+    return result
+
+@app.route('/api/clients/import', methods=['POST'])
+@require_auth
+def import_clients():
+    user_id = g.user['id']
+    # Excel upload
+    if 'file' in request.files:
+        f = request.files['file']
+        fname = f.filename.lower()
+        if fname.endswith('.xlsx') or fname.endswith('.xls'):
+            data = parse_xlsx_data(f.read())
+        elif fname.endswith('.csv'):
+            data = parse_csv_data(f.read().decode('utf-8-sig'))
+        else:
+            return jsonify(error='Formato no soportado. Usa .xlsx o .csv'), 400
+        imported, skipped, errors = import_rows(data, user_id)
+        log_activity(f'Importación Excel: {imported} clientes nuevos', 'client', None, user_id)
+        return jsonify(imported=imported, skipped=skipped, errors=errors)
+    # Google Sheets URL
+    data_json = request.get_json(silent=True) or {}
+    gs_url = data_json.get('gsheets_url', '')
+    if gs_url:
+        try:
+            # Convert share URL to CSV export URL
+            match = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', gs_url)
+            if not match:
+                return jsonify(error='URL de Google Sheets inválida'), 400
+            sheet_id = match.group(1)
+            gid_match = re.search(r'gid=(\d+)', gs_url)
+            gid = gid_match.group(1) if gid_match else '0'
+            csv_url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
+            req = urllib.request.Request(csv_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                text = resp.read().decode('utf-8-sig')
+            data = parse_csv_data(text)
+            imported, skipped, errors = import_rows(data, user_id)
+            log_activity(f'Importación Google Sheets: {imported} clientes nuevos', 'client', None, user_id)
+            return jsonify(imported=imported, skipped=skipped, errors=errors)
+        except Exception as e:
+            return jsonify(error=f'No se pudo acceder al Google Sheet: {str(e)}. Asegúrate de que el sheet sea público ("Cualquiera con el enlace puede ver").'), 400
+    return jsonify(error='Envía un archivo o una URL de Google Sheets'), 400
+
+@app.route('/api/clients/import/template', methods=['GET'])
+@require_auth
+def import_template():
+    from flask import Response
+    output = 'nombre,email,telefono,whatsapp,ciudad,direccion,rfc,notas\n'
+    output += 'Empresa Ejemplo,contacto@empresa.com,555-1234,5551234567,Monterrey,"Av. Principal 100",ABC123456DEF,"Cliente potencial"\n'
+    return Response(output, mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment;filename=plantilla_clientes.csv'})
+
+
+# ─── WhatsApp ──────────────────────────────────────────────────────────────────
+
+def get_wa_config():
+    r = db().execute('SELECT * FROM whatsapp_config WHERE id=1').fetchone()
+    return dict(r) if r else {}
+
+@app.route('/api/whatsapp/config', methods=['GET', 'POST'])
+@require_auth
+def whatsapp_config():
+    if g.user.get('role') != 'admin':
+        return jsonify(error='Sin permiso'), 403
+    if request.method == 'GET':
+        cfg = get_wa_config()
+        # Never return auth_token in full
+        if cfg.get('auth_token'):
+            cfg['auth_token'] = cfg['auth_token'][:6] + '••••••••'
+        return jsonify(cfg)
+    d = request.get_json()
+    existing = get_wa_config()
+    auth_token = d.get('auth_token', '')
+    if auth_token and '••' in auth_token:
+        auth_token = existing.get('auth_token', '')  # keep existing
+    if existing:
+        db().execute('''UPDATE whatsapp_config SET account_sid=?,auth_token=?,from_number=?,updated_at=datetime('now')
+                        WHERE id=1''',
+                     (d.get('account_sid'), auth_token or existing.get('auth_token'), d.get('from_number')))
+    else:
+        db().execute('''INSERT INTO whatsapp_config (id,account_sid,auth_token,from_number) VALUES (1,?,?,?)''',
+                     (d.get('account_sid'), auth_token, d.get('from_number')))
+    db().commit()
+    return jsonify(success=True)
+
+@app.route('/api/whatsapp/send', methods=['POST'])
+@require_auth
+def whatsapp_send():
+    d = request.get_json()
+    client_id = d.get('client_id')
+    body = d.get('body', '').strip()
+    to_number = d.get('to_number', '').strip()
+    if not body or not to_number:
+        return jsonify(error='Número y mensaje requeridos'), 400
+
+    cfg = get_wa_config()
+    if not cfg.get('account_sid') or not cfg.get('auth_token') or not cfg.get('from_number'):
+        return jsonify(error='Configura primero las credenciales de Twilio en Configuración → WhatsApp'), 400
+
+    try:
+        from twilio.rest import Client as TwilioClient
+        twilio = TwilioClient(cfg['account_sid'], cfg['auth_token'])
+        to_wa = 'whatsapp:' + (to_number if to_number.startswith('+') else '+' + to_number)
+        from_wa = 'whatsapp:' + cfg['from_number']
+        msg = twilio.messages.create(body=body, from_=from_wa, to=to_wa)
+        # Save message
+        db().execute('''INSERT INTO whatsapp_messages (client_id,direction,from_number,to_number,body,status,twilio_sid,user_id)
+                        VALUES (?,?,?,?,?,?,?,?)''',
+                     (client_id, 'outbound', cfg['from_number'], to_number, body, msg.status, msg.sid, g.user['id']))
+        db().commit()
+        return jsonify(success=True, sid=msg.sid)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+@app.route('/api/whatsapp/webhook', methods=['POST'])
+def whatsapp_webhook():
+    """Recibe mensajes entrantes de Twilio WhatsApp"""
+    from_number = request.form.get('From', '').replace('whatsapp:', '')
+    body = request.form.get('Body', '')
+    sid = request.form.get('MessageSid', '')
+    # Find client by whatsapp number
+    clean = re.sub(r'\D', '', from_number)
+    client = db().execute(
+        "SELECT id FROM clients WHERE REPLACE(REPLACE(REPLACE(whatsapp,'+',''),'-',''),' ','')=?",
+        (clean,)).fetchone()
+    client_id = client['id'] if client else None
+    db().execute('''INSERT INTO whatsapp_messages (client_id,direction,from_number,body,status,twilio_sid)
+                    VALUES (?,?,?,?,?,?)''',
+                 (client_id, 'inbound', from_number, body, 'received', sid))
+    db().commit()
+    return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
+
+@app.route('/api/whatsapp/messages/<int:client_id>', methods=['GET'])
+@require_auth
+def whatsapp_messages(client_id):
+    msgs = rows(db().execute('''SELECT m.*, u.name as user_name FROM whatsapp_messages m
+                                LEFT JOIN users u ON m.user_id=u.id
+                                WHERE m.client_id=? ORDER BY m.created_at ASC''', (client_id,)))
+    return jsonify(msgs)
 
 
 # Inicializar DB y rutas SPA al importar el módulo (necesario para gunicorn)

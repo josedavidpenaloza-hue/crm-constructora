@@ -171,7 +171,7 @@ function clientsPage() {
     },
     openNew() {
       this.editing = null;
-      this.form = { name: '', email: '', phone: '', address: '', city: '', rfc: '', notes: '' };
+      this.form = { name: '', email: '', phone: '', whatsapp: '', address: '', city: '', rfc: '', notes: '' };
       this.modal = true;
     },
     openEdit(c) { this.editing = c; this.form = { ...c }; this.modal = true; },
@@ -319,6 +319,124 @@ function tasksPage() {
     async changeStatus(task, status) {
       await put('/tasks/' + task.id, { ...task, status });
       task.status = status;
+    }
+  };
+}
+
+// ─── Import Clientes ──────────────────────────────────────────────────────────
+function importClientsModal() {
+  return {
+    open: false,
+    tab: 'file',         // 'file' | 'gsheets'
+    gsUrl: '',
+    loading: false,
+    result: null,
+    error: '',
+    dragOver: false,
+    selectedFile: null,
+
+    reset() { this.result = null; this.error = ''; this.gsUrl = ''; this.selectedFile = null; },
+    show() { this.reset(); this.open = true; },
+    hide() { this.open = false; },
+
+    onDrop(e) {
+      this.dragOver = false;
+      const f = e.dataTransfer.files[0];
+      if (f) this.selectedFile = f;
+    },
+    onFileInput(e) { this.selectedFile = e.target.files[0] || null; },
+
+    async importFile() {
+      if (!this.selectedFile) { this.error = 'Selecciona un archivo'; return; }
+      this.loading = true; this.error = ''; this.result = null;
+      const fd = new FormData();
+      fd.append('file', this.selectedFile);
+      const token = localStorage.getItem('token');
+      try {
+        const res = await fetch('/api/clients/import', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token },
+          body: fd
+        });
+        const data = await res.json();
+        if (data.error) this.error = data.error;
+        else this.result = data;
+      } catch(e) { this.error = 'Error de conexión'; }
+      this.loading = false;
+    },
+
+    async importGSheets() {
+      if (!this.gsUrl) { this.error = 'Pega la URL del Google Sheet'; return; }
+      this.loading = true; this.error = ''; this.result = null;
+      const token = localStorage.getItem('token');
+      try {
+        const res = await fetch('/api/clients/import', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gsheets_url: this.gsUrl })
+        });
+        const data = await res.json();
+        if (data.error) this.error = data.error;
+        else this.result = data;
+      } catch(e) { this.error = 'Error de conexión'; }
+      this.loading = false;
+    },
+
+    downloadTemplate() {
+      window.open('/api/clients/import/template', '_blank');
+    }
+  };
+}
+
+// ─── WhatsApp Chat ─────────────────────────────────────────────────────────────
+function whatsappChat(clientId, clientName, whatsappNumber) {
+  return {
+    clientId, clientName, whatsappNumber,
+    messages: [], loading: true,
+    newMessage: '', sending: false, error: '',
+    configOpen: false,
+    config: { account_sid: '', auth_token: '', from_number: '' },
+
+    waLink() {
+      const num = (this.whatsappNumber || '').replace(/\D/g, '');
+      return num ? `https://wa.me/${num}` : null;
+    },
+
+    async init() { await this.loadMessages(); },
+
+    async loadMessages() {
+      this.loading = true;
+      this.messages = await get('/whatsapp/messages/' + this.clientId) || [];
+      this.loading = false;
+      this.$nextTick(() => {
+        const el = this.$refs.chatBox;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    async send() {
+      if (!this.newMessage.trim()) return;
+      const num = (this.whatsappNumber || '').replace(/\D/g, '');
+      if (!num) { this.error = 'El cliente no tiene número de WhatsApp registrado'; return; }
+      this.sending = true; this.error = '';
+      const data = await post('/whatsapp/send', {
+        client_id: this.clientId,
+        to_number: num,
+        body: this.newMessage.trim()
+      });
+      this.sending = false;
+      if (data && data.error) { this.error = data.error; }
+      else { this.newMessage = ''; await this.loadMessages(); }
+    },
+
+    async loadConfig() {
+      const data = await get('/whatsapp/config');
+      if (data) this.config = data;
+      this.configOpen = true;
+    },
+    async saveConfig() {
+      await put('/whatsapp/config', this.config);
+      this.configOpen = false;
     }
   };
 }

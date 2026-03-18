@@ -3,3 +3,6 @@ PyJWT==2.9.0
 bcrypt==4.1.2
 Werkzeug==2.3.7
 gunicorn==21.2.0
+openpyxl==3.1.2
+requests==2.31.0
+twilio==8.10.0

@@ -37,12 +37,35 @@ def init_db():
         name TEXT NOT NULL,
         email TEXT,
         phone TEXT,
+        whatsapp TEXT,
         address TEXT,
         city TEXT,
         rfc TEXT,
         notes TEXT,
         created_by INTEGER,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER,
+        direction TEXT NOT NULL DEFAULT 'outbound',
+        from_number TEXT,
+        to_number TEXT,
+        body TEXT NOT NULL,
+        status TEXT DEFAULT 'sent',
+        twilio_sid TEXT,
+        user_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_config (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        account_sid TEXT,
+        auth_token TEXT,
+        from_number TEXT,
+        webhook_url TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS projects (
