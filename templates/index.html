@@ -99,38 +99,63 @@
             <div x-show="loading" class="text-gray-400 py-10 text-center">Cargando...</div>
             <template x-if="!loading && data">
               <div class="space-y-5">
-                <!-- Stat cards -->
+                <!-- KPIs principales -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-xl">👥</div>
-                    <div><p class="text-sm text-gray-500">Clientes</p><p class="text-2xl font-bold" x-text="data.stats.total_clients"></p></div>
+                    <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center text-xl">🏠</div>
+                    <div><p class="text-sm text-gray-500">Unidades disponibles</p><p class="text-2xl font-bold text-green-600" x-text="data.stats.units_disponible"></p><p class="text-xs text-gray-400" x-text="'de ' + data.stats.units_total + ' totales'"></p></div>
                   </div>
                   <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center text-xl">🏗️</div>
-                    <div><p class="text-sm text-gray-500">En proceso</p><p class="text-2xl font-bold" x-text="data.stats.projects_en_proceso"></p></div>
+                    <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-xl">💰</div>
+                    <div><p class="text-sm text-gray-500">Recaudo ventas</p><p class="text-2xl font-bold text-blue-600" x-text="fmt(data.stats.caja_ventas)"></p><p class="text-xs text-gray-400" x-text="data.stats.units_vendido + ' unid. escrituradas'"></p></div>
                   </div>
                   <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center text-xl">✅</div>
-                    <div><p class="text-sm text-gray-500">Mis tareas</p><p class="text-2xl font-bold" x-text="data.stats.my_tasks"></p></div>
+                    <div class="w-12 h-12 rounded-xl bg-yellow-100 flex items-center justify-center text-xl">🤝</div>
+                    <div><p class="text-sm text-gray-500">Separaciones</p><p class="text-2xl font-bold text-yellow-600" x-text="fmt(data.stats.caja_separaciones)"></p><p class="text-xs text-gray-400" x-text="data.stats.leads_separacion + ' unid. separadas'"></p></div>
                   </div>
                   <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center text-xl">💰</div>
-                    <div><p class="text-sm text-gray-500">Cartera</p><p class="text-2xl font-bold" x-text="fmt(data.stats.total_budget)"></p></div>
+                    <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-xl">📊</div>
+                    <div><p class="text-sm text-gray-500">Pipeline activo</p><p class="text-2xl font-bold text-purple-600" x-text="fmt(data.stats.pipeline_value)"></p><p class="text-xs text-gray-400" x-text="data.stats.total_leads + ' leads activos'"></p></div>
                   </div>
                 </div>
-                <!-- Breakdown -->
-                <div class="grid grid-cols-3 gap-4">
-                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
-                    <p class="text-3xl font-bold text-blue-600" x-text="data.stats.projects_cotizacion"></p>
-                    <p class="text-sm text-gray-500 mt-1">Cotizaciones</p>
+                <!-- KPIs secundarios -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div class="bg-white rounded-xl border border-gray-100 p-4 text-center">
+                    <p class="text-2xl font-bold text-blue-600" x-text="data.stats.projects_cotizacion"></p>
+                    <p class="text-xs text-gray-500 mt-1">Cotizaciones</p>
                   </div>
-                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
-                    <p class="text-3xl font-bold text-yellow-600" x-text="data.stats.projects_en_proceso"></p>
-                    <p class="text-sm text-gray-500 mt-1">En proceso</p>
+                  <div class="bg-white rounded-xl border border-gray-100 p-4 text-center">
+                    <p class="text-2xl font-bold text-orange-600" x-text="data.stats.projects_en_proceso"></p>
+                    <p class="text-xs text-gray-500 mt-1">Obras en proceso</p>
                   </div>
-                  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 text-center">
-                    <p class="text-3xl font-bold text-green-600" x-text="data.stats.projects_completado"></p>
-                    <p class="text-sm text-gray-500 mt-1">Completados</p>
+                  <div class="bg-white rounded-xl border border-gray-100 p-4 text-center">
+                    <p class="text-2xl font-bold text-green-600" x-text="data.stats.leads_calificados"></p>
+                    <p class="text-xs text-gray-500 mt-1">Leads calificados</p>
+                  </div>
+                  <div class="bg-white rounded-xl border border-gray-100 p-4 text-center">
+                    <p class="text-2xl font-bold text-gray-700" x-text="data.stats.my_tasks"></p>
+                    <p class="text-xs text-gray-500 mt-1">Mis tareas</p>
+                  </div>
+                </div>
+                <!-- Avances de obra -->
+                <div x-show="data.projects_progress && data.projects_progress.length > 0" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                  <h2 class="font-semibold mb-4">🏗️ Avance de obra y ventas</h2>
+                  <div class="space-y-4">
+                    <template x-for="p in data.projects_progress" :key="p.id">
+                      <div @click="goProject(p.id)" class="cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2">
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="text-sm font-medium" x-text="p.name"></span>
+                          <div class="flex items-center gap-3 text-xs text-gray-500">
+                            <span x-text="'🏠 '+p.units_disp+' disp · '+p.units_res+' sep · '+p.units_vend+' vend'"></span>
+                            <span class="font-semibold" x-text="p.pct+'% avance'"></span>
+                          </div>
+                        </div>
+                        <div class="bg-gray-100 rounded-full h-2">
+                          <div class="bg-orange-500 h-2 rounded-full transition-all" :style="'width:'+p.pct+'%'"></div>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1" x-text="p.done_tasks+' de '+p.total_tasks+' tareas · '+p.location"></p>
+                      </div>
+                    </template>
                   </div>
                 </div>
                 <!-- Recent + upcoming -->
@@ -763,6 +788,12 @@
                       <option value="directo">Directo</option><option value="facebook">Facebook</option><option value="instagram">Instagram</option><option value="whatsapp">WhatsApp</option><option value="referido">Referido</option><option value="portal">Portal inmobiliario</option><option value="llamada">Llamada</option>
                     </select>
                   </div>
+                  <div class="col-span-2"><label class="block text-sm font-medium text-gray-700 mb-1">Vincular a cliente existente (opcional)</label>
+                    <select x-model="form.client_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                      <option value="">— Sin vincular (se crea al escriturar) —</option>
+                      <template x-for="c in clients" :key="c.id"><option :value="c.id" x-text="c.name+(c.phone?' ('+c.phone+')':'')"></option></template>
+                    </select>
+                  </div>
                   <div><label class="block text-sm font-medium text-gray-700 mb-1">Proyecto</label>
                     <select x-model="form.project_id" @change="onProjectChange()" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
                       <option value="">Sin proyecto</option>
@@ -833,6 +864,7 @@
                   <div>
                     <h2 class="font-bold text-lg" x-text="selectedLead.name"></h2>
                     <span class="badge" :style="stageBadge(selectedLead.stage)" x-text="stageLabel(selectedLead.stage)"></span>
+                    <p x-show="leadDetail.client_name" class="text-sm text-blue-600">👤 Cliente: <span x-text="leadDetail.client_name" class="font-medium"></span></p>
                   </div>
                   <div class="flex gap-2">
                     <button @click="openEdit(selectedLead)" class="text-sm border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">✏️ Editar</button>
@@ -1084,6 +1116,41 @@
                 </button>
               </form>
             </div>
+
+            <!-- Sofía IA — solo admin -->
+            <div x-show="$store === undefined || true" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+              <div class="pb-3 border-b flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-xl">🤖</div>
+                <div>
+                  <h2 class="font-semibold">Sofía — Asistente de ventas IA</h2>
+                  <p class="text-xs text-gray-400">Conectada vía WhatsApp · Alimentada por Claude (Anthropic)</p>
+                </div>
+              </div>
+              <form @submit.prevent="saveSofia()" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Nombre de la asistente</label>
+                  <input x-model="sofiaCfg.sofia_name" placeholder="Sofía" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"/>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Anthropic API Key (Claude)</label>
+                  <input x-model="sofiaCfg.anthropic_key" type="password" placeholder="sk-ant-..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"/>
+                  <p class="text-xs text-gray-400 mt-1">Obtenla en <a href="https://console.anthropic.com" target="_blank" class="text-orange-500 hover:underline">console.anthropic.com</a>. Sin esta clave usa el bot por reglas.</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Personalidad y estilo de ventas</label>
+                  <textarea x-model="sofiaCfg.sofia_persona" rows="3" placeholder="Ej: Eres muy entusiasta, usas emojis, hablas de manera cercana y tuteas al cliente. Siempre resaltas las ventajas financieras y el valor a futuro de cada propiedad." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Información adicional para Sofía</label>
+                  <textarea x-model="sofiaCfg.sofia_extra_info" rows="4" placeholder="Ej: Nuestra constructora lleva 15 años en el mercado. Ofrecemos garantía de 5 años. Trabajamos con Bancolombia, Davivienda y Nación. La cuota de separación es del 1% del precio. Los proyectos están en zonas de valorización..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"></textarea>
+                </div>
+                <div x-show="sofiaError" class="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg" x-text="sofiaError"></div>
+                <div x-show="sofiaSaved" class="text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">✅ Configuración de Sofía guardada</div>
+                <button type="submit" :disabled="sofiaLoading" class="bg-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50">
+                  <span x-text="sofiaLoading ? 'Guardando...' : '💾 Guardar configuración de Sofía'"></span>
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </template>
@@ -1155,6 +1222,6 @@
 </div>
 </template>
 
-<script src="/static/js/app.js?v=5"></script>
+<script src="/static/js/app.js?v=6"></script>
 </body>
 </html>

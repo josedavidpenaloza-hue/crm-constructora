@@ -476,7 +476,7 @@ function qualScore(lead) {
 
 function leadsPage() {
   return {
-    leads: [], projects: [], team: [], units: [],
+    leads: [], projects: [], clients: [], team: [], units: [],
     loading: true, filterProject: '', filterStage: '', search: '',
     selectedLead: null, leadDetail: null, detailLoading: false,
     showForm: false, editingLead: null,
@@ -508,10 +508,11 @@ function leadsPage() {
 
     async init() {
       this.loading = true;
-      const [leads, projects, team] = await Promise.all([get('/leads'), get('/projects'), get('/team')]);
+      const [leads, projects, team, clients] = await Promise.all([get('/leads'), get('/projects'), get('/team'), get('/clients')]);
       this.leads = leads || [];
       this.projects = projects || [];
       this.team = team || [];
+      this.clients = clients || [];
       this.loading = false;
       this.loadReminders();
     },
@@ -538,7 +539,7 @@ function leadsPage() {
 
     openNew() {
       this.editingLead = null;
-      this.form = { name:'', phone:'', whatsapp:'', email:'', project_id:'', unit_id:'', stage:'nuevo', source:'directo',
+      this.form = { name:'', phone:'', whatsapp:'', email:'', client_id:'', project_id:'', unit_id:'', stage:'nuevo', source:'directo',
         tiene_dinero_separacion:false, tiene_credito:false, tipo_credito:'', tiene_subsidio:false,
         caja_compensacion:'', puede_cubrir_faltante:false, budget:'', next_contact:'', notes:'', assigned_to:'' };
       this.showForm = true;
@@ -666,9 +667,28 @@ function settingsPage() {
     pw: { current_password: '', new_password: '', confirm: '' },
     pwLoading: false, pwSaved: false, pwError: '',
 
+    // Sofia config
+    sofiaCfg: { sofia_name: 'Sofía', sofia_persona: '', sofia_extra_info: '', anthropic_key: '' },
+    sofiaLoading: false, sofiaSaved: false, sofiaError: '',
+
     async init() {
       const u = JSON.parse(localStorage.getItem('user') || 'null');
       if (u) this.profile = { name: u.name, email: u.email };
+      if (u?.role === 'admin') await this.loadSofia();
+    },
+
+    async loadSofia() {
+      const d = await get('/sofia/config');
+      if (d) this.sofiaCfg = { sofia_name: d.sofia_name||'Sofía', sofia_persona: d.sofia_persona||'', sofia_extra_info: d.sofia_extra_info||'', anthropic_key: d.has_key ? '••••••••' : '' };
+    },
+
+    async saveSofia() {
+      this.sofiaLoading = true; this.sofiaSaved = false; this.sofiaError = '';
+      const data = await post('/sofia/config', this.sofiaCfg);
+      this.sofiaLoading = false;
+      if (data?.error) { this.sofiaError = data.error; return; }
+      this.sofiaSaved = true;
+      setTimeout(() => this.sofiaSaved = false, 3000);
     },
 
     async saveProfile() {

@@ -172,16 +172,62 @@ def me():
 def dashboard():
     d = db()
     uid = g.user['id']
+
+    # ── KPIs principales ──────────────────────────────────────────────────────
     stats = {
-        'total_clients': d.execute('SELECT COUNT(*) FROM clients').fetchone()[0],
-        'total_projects': d.execute('SELECT COUNT(*) FROM projects').fetchone()[0],
-        'projects_en_proceso': d.execute("SELECT COUNT(*) FROM projects WHERE status='en_proceso'").fetchone()[0],
-        'projects_cotizacion': d.execute("SELECT COUNT(*) FROM projects WHERE status='cotizacion'").fetchone()[0],
-        'projects_completado': d.execute("SELECT COUNT(*) FROM projects WHERE status='completado'").fetchone()[0],
-        'total_tasks_pending': d.execute("SELECT COUNT(*) FROM tasks WHERE status!='completado'").fetchone()[0],
-        'total_budget': d.execute("SELECT COALESCE(SUM(budget),0) FROM projects WHERE status!='cancelado'").fetchone()[0],
-        'my_tasks': d.execute("SELECT COUNT(*) FROM tasks WHERE assigned_to=? AND status!='completado'", (uid,)).fetchone()[0],
+        'total_clients':          d.execute('SELECT COUNT(*) FROM clients').fetchone()[0],
+        'total_projects':         d.execute('SELECT COUNT(*) FROM projects').fetchone()[0],
+        'projects_en_proceso':    d.execute("SELECT COUNT(*) FROM projects WHERE status='en_proceso'").fetchone()[0],
+        'projects_cotizacion':    d.execute("SELECT COUNT(*) FROM projects WHERE status='cotizacion'").fetchone()[0],
+        'projects_completado':    d.execute("SELECT COUNT(*) FROM projects WHERE status='completado'").fetchone()[0],
+        'total_tasks_pending':    d.execute("SELECT COUNT(*) FROM tasks WHERE status!='completado'").fetchone()[0],
+        'total_budget':           d.execute("SELECT COALESCE(SUM(budget),0) FROM projects WHERE status!='cancelado'").fetchone()[0],
+        'my_tasks':               d.execute("SELECT COUNT(*) FROM tasks WHERE assigned_to=? AND status!='completado'", (uid,)).fetchone()[0],
+        # Unidades
+        'units_total':            d.execute("SELECT COUNT(*) FROM units").fetchone()[0],
+        'units_disponible':       d.execute("SELECT COUNT(*) FROM units WHERE status='disponible'").fetchone()[0],
+        'units_reservado':        d.execute("SELECT COUNT(*) FROM units WHERE status='reservado'").fetchone()[0],
+        'units_vendido':          d.execute("SELECT COUNT(*) FROM units WHERE status='vendido'").fetchone()[0],
+        # Recaudo
+        'revenue_vendido':        d.execute("SELECT COALESCE(SUM(price),0) FROM units WHERE status='vendido'").fetchone()[0],
+        'revenue_reservado':      d.execute("SELECT COALESCE(SUM(price),0) FROM units WHERE status='reservado'").fetchone()[0],
+        # Pipeline de ventas
+        'total_leads':            d.execute("SELECT COUNT(*) FROM leads WHERE stage!='perdido'").fetchone()[0],
+        'leads_calificados':      d.execute("SELECT COUNT(*) FROM leads WHERE stage IN ('calificacion','negociacion','separacion','escriturado')").fetchone()[0],
+        'leads_separacion':       d.execute("SELECT COUNT(*) FROM leads WHERE stage='separacion'").fetchone()[0],
+        'leads_escriturado':      d.execute("SELECT COUNT(*) FROM leads WHERE stage='escriturado'").fetchone()[0],
+        'leads_perdido':          d.execute("SELECT COUNT(*) FROM leads WHERE stage='perdido'").fetchone()[0],
+        # Caja: recaudo real de ventas y separaciones ligadas a unidades
+        'caja_ventas':            d.execute("""
+            SELECT COALESCE(SUM(u.price),0) FROM leads l
+            JOIN units u ON l.unit_id=u.id WHERE l.stage='escriturado'""").fetchone()[0],
+        'caja_separaciones':      d.execute("""
+            SELECT COALESCE(SUM(u.price),0) FROM leads l
+            JOIN units u ON l.unit_id=u.id WHERE l.stage='separacion'""").fetchone()[0],
+        'pipeline_value':         d.execute("""
+            SELECT COALESCE(SUM(budget),0) FROM leads
+            WHERE stage NOT IN ('perdido','escriturado') AND budget IS NOT NULL""").fetchone()[0],
     }
+
+    # ── Avances de obra (proyectos en proceso) ───────────────────────────────
+    projects_progress = rows(d.execute("""
+        SELECT p.id, p.name, p.status, p.budget, p.location,
+               COUNT(t.id) as total_tasks,
+               SUM(CASE WHEN t.status='completado' THEN 1 ELSE 0 END) as done_tasks,
+               (SELECT COUNT(*) FROM units WHERE project_id=p.id) as units_total,
+               (SELECT COUNT(*) FROM units WHERE project_id=p.id AND status='disponible') as units_disp,
+               (SELECT COUNT(*) FROM units WHERE project_id=p.id AND status='vendido') as units_vend,
+               (SELECT COUNT(*) FROM units WHERE project_id=p.id AND status='reservado') as units_res
+        FROM projects p LEFT JOIN tasks t ON t.project_id=p.id
+        WHERE p.status IN ('en_proceso','cotizacion')
+        GROUP BY p.id ORDER BY p.created_at DESC"""))
+
+    # Calcular % avance por proyecto
+    for p in projects_progress:
+        total = p.get('total_tasks') or 0
+        done  = p.get('done_tasks')  or 0
+        p['pct'] = round(done / total * 100) if total > 0 else 0
+
     recent_projects = rows(d.execute("""
         SELECT p.id, p.name, p.status, p.budget, c.name as client_name
         FROM projects p LEFT JOIN clients c ON p.client_id=c.id
@@ -192,13 +238,14 @@ def dashboard():
         ORDER BY a.created_at DESC LIMIT 10"""))
     upcoming_tasks = rows(d.execute("""
         SELECT t.*, p.name as project_name, u.name as assigned_name
-        FROM tasks t
-        LEFT JOIN projects p ON t.project_id=p.id
+        FROM tasks t LEFT JOIN projects p ON t.project_id=p.id
         LEFT JOIN users u ON t.assigned_to=u.id
         WHERE t.status!='completado' AND t.due_date IS NOT NULL
         ORDER BY t.due_date ASC LIMIT 5"""))
+
     return jsonify(stats=stats, recent_projects=recent_projects,
-                   recent_activities=recent_activities, upcoming_tasks=upcoming_tasks)
+                   recent_activities=recent_activities, upcoming_tasks=upcoming_tasks,
+                   projects_progress=projects_progress)
 
 
 # ─── Clients ──────────────────────────────────────────────────────────────────
@@ -585,12 +632,13 @@ def leads():
     if request.method == 'GET':
         project_id = request.args.get('project_id')
         q = '''SELECT l.*, p.name as project_name, u.unit_number,
-                      tm.name as assigned_name,
+                      tm.name as assigned_name, cl.name as client_name,
                       (SELECT COUNT(*) FROM lead_activities a WHERE a.lead_id=l.id) as activity_count
                FROM leads l
                LEFT JOIN projects p ON l.project_id=p.id
                LEFT JOIN units u ON l.unit_id=u.id
                LEFT JOIN users tm ON l.assigned_to=tm.id
+               LEFT JOIN clients cl ON l.client_id=cl.id
                WHERE 1=1'''
         params = []
         if project_id:
@@ -602,12 +650,13 @@ def leads():
     if not d.get('name'):
         return jsonify(error='Nombre requerido'), 400
     c = db().execute('''INSERT INTO leads
-        (project_id,unit_id,name,phone,whatsapp,email,stage,source,
+        (client_id,project_id,unit_id,name,phone,whatsapp,email,stage,source,
          tiene_dinero_separacion,tiene_credito,tipo_credito,tiene_subsidio,
          caja_compensacion,puede_cubrir_faltante,budget,next_contact,notes,
          assigned_to,created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-        (d.get('project_id'), d.get('unit_id'), d['name'], d.get('phone'), d.get('whatsapp'),
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (d.get('client_id') or None, d.get('project_id'), d.get('unit_id'),
+         d['name'], d.get('phone'), d.get('whatsapp'),
          d.get('email'), d.get('stage', 'nuevo'), d.get('source', 'directo'),
          int(d.get('tiene_dinero_separacion', 0)), int(d.get('tiene_credito', 0)),
          d.get('tipo_credito'), int(d.get('tiene_subsidio', 0)),
@@ -627,10 +676,11 @@ def leads():
 def lead_detail(lid):
     if request.method == 'GET':
         l = row(db().execute('''SELECT l.*, p.name as project_name, u.unit_number, u.price as unit_price,
-                                       tm.name as assigned_name
+                                       tm.name as assigned_name, cl.name as client_name
                                 FROM leads l LEFT JOIN projects p ON l.project_id=p.id
                                 LEFT JOIN units u ON l.unit_id=u.id
                                 LEFT JOIN users tm ON l.assigned_to=tm.id
+                                LEFT JOIN clients cl ON l.client_id=cl.id
                                 WHERE l.id=?''', (lid,)))
         if not l:
             return jsonify(error='No encontrado'), 404
@@ -642,11 +692,12 @@ def lead_detail(lid):
     if request.method == 'PUT':
         d = request.get_json()
         old = row(db().execute('SELECT stage FROM leads WHERE id=?', (lid,)))
-        db().execute('''UPDATE leads SET project_id=?,unit_id=?,name=?,phone=?,whatsapp=?,email=?,
+        db().execute('''UPDATE leads SET client_id=?,project_id=?,unit_id=?,name=?,phone=?,whatsapp=?,email=?,
                         stage=?,source=?,tiene_dinero_separacion=?,tiene_credito=?,tipo_credito=?,
                         tiene_subsidio=?,caja_compensacion=?,puede_cubrir_faltante=?,budget=?,
                         next_contact=?,notes=?,assigned_to=?,last_contact=datetime('now') WHERE id=?''',
-                     (d.get('project_id'), d.get('unit_id') or None, d.get('name'), d.get('phone'),
+                     (d.get('client_id') or None, d.get('project_id'), d.get('unit_id') or None,
+                      d.get('name'), d.get('phone'),
                       d.get('whatsapp'), d.get('email'), d.get('stage'), d.get('source'),
                       int(d.get('tiene_dinero_separacion', 0)), int(d.get('tiene_credito', 0)),
                       d.get('tipo_credito'), int(d.get('tiene_subsidio', 0)),
@@ -661,6 +712,25 @@ def lead_detail(lid):
         if old and old['stage'] != d.get('stage'):
             db().execute("INSERT INTO lead_activities (lead_id,type,description,user_id) VALUES (?,?,?,?)",
                          (lid, 'etapa', f"Etapa cambiada: {old['stage']} → {d.get('stage')}", g.user['id']))
+            # Auto-crear cliente cuando lead llega a escriturado
+            if d.get('stage') == 'escriturado' and not d.get('client_id'):
+                try:
+                    existing_cl = db().execute(
+                        "SELECT id FROM clients WHERE email=? OR phone=?",
+                        (d.get('email') or '__none__', d.get('phone') or '__none__')).fetchone()
+                    if existing_cl:
+                        cl_id = existing_cl['id']
+                    else:
+                        cl_cur = db().execute(
+                            "INSERT INTO clients (name,email,phone,whatsapp,notes,created_by) VALUES (?,?,?,?,?,?)",
+                            (d['name'], d.get('email'), d.get('phone'), d.get('whatsapp'),
+                             f"Creado automáticamente desde lead #{lid}", g.user['id']))
+                        cl_id = cl_cur.lastrowid
+                    db().execute("UPDATE leads SET client_id=? WHERE id=?", (cl_id, lid))
+                    db().execute("INSERT INTO lead_activities (lead_id,type,description,user_id) VALUES (?,?,?,?)",
+                                 (lid, 'nota', f"✅ Cliente vinculado automáticamente (ID {cl_id})", g.user['id']))
+                except Exception:
+                    pass
         db().commit()
         return jsonify(success=True)
     db().execute('DELETE FROM lead_activities WHERE lead_id=?', (lid,))
@@ -898,85 +968,91 @@ def generate_rule_reply(lead, msg):
 
 
 def generate_ai_reply(lead, user_message, api_key):
-    """Genera respuesta usando Claude - califica al lead naturalmente"""
+    """Genera respuesta usando Claude — vendedora configurable"""
     import anthropic as ant
 
-    # Cargar historial de conversación reciente
+    # Cargar configuración de Sofía
+    cfg = get_wa_config()
+    sofia_name       = cfg.get('sofia_name') or 'Sofía'
+    sofia_persona    = cfg.get('sofia_persona') or ''
+    sofia_extra_info = cfg.get('sofia_extra_info') or ''
+
+    # Historial de conversación
     msgs = rows(db().execute("""SELECT direction, body FROM whatsapp_messages
                                 WHERE client_id=? ORDER BY created_at DESC LIMIT 20""", (lead['id'],)))
     msgs.reverse()
 
-    # Cargar proyectos disponibles con unidades
+    # Proyectos disponibles con detalles completos de unidades
     projects_info = rows(db().execute("""
         SELECT p.name, p.location, p.description,
                COUNT(u.id) as total_units,
                SUM(CASE WHEN u.status='disponible' THEN 1 ELSE 0 END) as available_units,
                MIN(u.price) as min_price, MAX(u.price) as max_price,
-               GROUP_CONCAT(u.bedrooms || 'hab $' || COALESCE(u.price,'?'), ' | ') as unit_types
+               MIN(u.area_m2) as min_area, MAX(u.area_m2) as max_area,
+               MIN(u.bedrooms) as min_hab, MAX(u.bedrooms) as max_hab
         FROM projects p LEFT JOIN units u ON u.project_id=p.id
         WHERE p.status IN ('cotizacion','en_proceso')
         GROUP BY p.id"""))
 
     projects_text = ""
     for p in projects_info:
-        projects_text += f"\n- {p['name']} en {p.get('location', '')}: {p.get('available_units', 0)} unidades disponibles, precios desde ${p.get('min_price', '?')} hasta ${p.get('max_price', '?')}. {p.get('description', '')}"
+        hab = f"{p['min_hab']}" if p['min_hab']==p['max_hab'] else f"{p['min_hab']}-{p['max_hab']}"
+        area = f"{p['min_area']:.0f}" if p.get('min_area') else '?'
+        precio = f"desde ${p['min_price']:,.0f}" if p.get('min_price') else "consultar"
+        projects_text += (f"\n• {p['name']} | {p.get('location','')} | {p.get('available_units',0)} unidades disp."
+                         f" | {hab} hab | {area}m² | {precio} hasta ${p['max_price']:,.0f}" if p.get('max_price') else f"\n• {p['name']} | {p.get('location','')} | {p.get('available_units',0)} unidades disp.")
+        if p.get('description'):
+            projects_text += f"\n  Descripción: {p['description']}"
 
-    # Estado actual del lead
     qual_status = []
-    if lead.get('tiene_dinero_separacion'): qual_status.append("Tiene dinero para separacion")
-    if lead.get('tiene_credito'): qual_status.append("Tiene/puede acceder a credito hipotecario")
-    if lead.get('tiene_subsidio'): qual_status.append("Tiene subsidio de caja de compensacion")
-    if lead.get('puede_cubrir_faltante'): qual_status.append("Puede cubrir el faltante")
+    if lead.get('tiene_dinero_separacion'): qual_status.append("✅ Tiene dinero para separación")
+    if lead.get('tiene_credito'):           qual_status.append("✅ Tiene/puede acceder a crédito hipotecario")
+    if lead.get('tiene_subsidio'):          qual_status.append("✅ Tiene subsidio de caja de compensación")
+    if lead.get('puede_cubrir_faltante'):   qual_status.append("✅ Puede cubrir el faltante")
 
-    system_prompt = f"""Eres un asesor inmobiliario amigable y profesional de una constructora. Tu nombre es Sofia.
-Tu objetivo es ayudar a las personas a encontrar su hogar ideal y cualificarlos como compradores potenciales.
+    persona_extra = f"\nPERSONA Y ESTILO:\n{sofia_persona}" if sofia_persona else ""
+    info_extra    = f"\nINFORMACIÓN ADICIONAL DE LA EMPRESA:\n{sofia_extra_info}" if sofia_extra_info else ""
 
-PROYECTOS DISPONIBLES:{projects_text if projects_text else " (No hay proyectos disponibles en este momento)"}
-
-INFORMACION DEL LEAD:
-- Nombre: {lead.get('name', 'Cliente')}
-- Etapa actual: {lead.get('stage', 'nuevo')}
-- Cualificacion: {', '.join(qual_status) if qual_status else 'Sin cualificar aun'}
+    system_prompt = f"""Eres {sofia_name}, asesora de ventas inmobiliarias de una constructora colombiana. Eres amigable, profesional y experta en el portafolio.
+{persona_extra}
+PORTAFOLIO DISPONIBLE:{projects_text if projects_text else " (Sin proyectos activos ahora mismo)"}
+{info_extra}
+DATOS DEL CLIENTE:
+- Nombre: {lead.get('name','Cliente')}
+- Etapa: {lead.get('stage','nuevo')}
+- Calificación: {', '.join(qual_status) if qual_status else 'Sin cualificar aún'}
 
 INSTRUCCIONES:
-1. Responde de manera natural, calida y en espanol colombiano.
-2. Presenta los proyectos de forma atractiva cuando sea relevante.
-3. A lo largo de la conversacion, trata de identificar NATURALMENTE (sin ser invasivo):
-   - Si tienen listo el dinero para la cuota de separacion/reserva
-   - Si ya tienen un credito hipotecario aprobado o si pueden acceder a uno
-   - Si cuentan con subsidio de caja de compensacion familiar
-   - Si pueden cubrir la diferencia entre el credito y el precio
-4. Cuando identifiques informacion financiera, responde con [QUAL:campo=valor] al FINAL del mensaje (el sistema lo procesara, no lo mostrara al cliente):
-   - [QUAL:dinero_separacion=1] cuando confirmen tener cuota inicial/separacion
-   - [QUAL:credito=1] cuando confirmen tener o poder acceder a credito hipotecario
-   - [QUAL:subsidio=1] cuando confirmen tener subsidio de caja
-   - [QUAL:faltante=1] cuando confirmen poder cubrir el faltante
-5. Si el lead esta completamente cualificado (tiene todo), termina con [QUAL:listo=1]
-6. Mensajes cortos y conversacionales (maximo 3-4 lineas).
-7. NO menciones precios exactos a menos que te los pregunten directamente."""
+1. Responde en español colombiano, cálido y natural. Máximo 3-4 líneas por mensaje.
+2. Presenta el portafolio de forma atractiva cuando el cliente pregunte o sea el momento adecuado.
+3. Cualifica naturalmente: identifica si tiene separación, crédito/subsidio y capacidad de pago.
+4. Cuando confirmes información financiera, escribe al FINAL del mensaje (el sistema lo procesa internamente):
+   [QUAL:dinero_separacion=1] — tiene cuota de separación
+   [QUAL:credito=1]           — tiene o puede acceder a crédito hipotecario
+   [QUAL:subsidio=1]          — tiene subsidio de caja compensación
+   [QUAL:faltante=1]          — puede cubrir el faltante
+   [QUAL:listo=1]             — lead completamente cualificado
+5. NO inventes precios ni información que no esté en el portafolio.
+6. Si el cliente pide hablar con un humano, responde con amabilidad que notificarás a un asesor."""
 
-    # Construir historial
     history = []
-    for m in msgs[-10:]:
+    for m in msgs[-12:]:
         role = "user" if m['direction'] == 'inbound' else "assistant"
         history.append({"role": role, "content": m['body']})
-
-    # Agregar mensaje actual si no esta ya
     if not history or history[-1]['content'] != user_message:
         history.append({"role": "user", "content": user_message})
 
     client = ant.Anthropic(api_key=api_key)
     response = client.messages.create(
-        model="claude-haiku-20240307",
-        max_tokens=300,
+        model="claude-3-5-haiku-20241022",
+        max_tokens=400,
         system=system_prompt,
         messages=history
     )
     reply_text = response.content[0].text
 
-    # Procesar tags de cualificacion
-    import re as _re
-    qual_tags = _re.findall(r'\[QUAL:(\w+)=(\w+)\]', reply_text)
+    # Procesar tags de cualificación
+    qual_tags = re.findall(r'\[QUAL:(\w+)=(\w+)\]', reply_text)
     for key, val in qual_tags:
         if key == 'dinero_separacion' and val == '1':
             db().execute("UPDATE leads SET tiene_dinero_separacion=1 WHERE id=?", (lead['id'],))
@@ -991,8 +1067,7 @@ INSTRUCCIONES:
     if qual_tags:
         db().commit()
 
-    # Remover tags del mensaje final
-    clean_reply = _re.sub(r'\[QUAL:[^\]]+\]', '', reply_text).strip()
+    clean_reply = re.sub(r'\[QUAL:[^\]]+\]', '', reply_text).strip()
     return clean_reply
 
 
@@ -1026,6 +1101,42 @@ def whatsapp_config():
     else:
         db().execute('''INSERT INTO whatsapp_config (id,account_sid,auth_token,from_number,anthropic_key) VALUES (1,?,?,?,?)''',
                      (d.get('account_sid'), auth_token, d.get('from_number'), d.get('anthropic_key')))
+    db().commit()
+    return jsonify(success=True)
+
+@app.route('/api/sofia/config', methods=['GET', 'POST'])
+@require_auth
+def sofia_config():
+    if g.user.get('role') != 'admin':
+        return jsonify(error='Sin permiso'), 403
+    if request.method == 'GET':
+        cfg = get_wa_config()
+        return jsonify({
+            'sofia_name':       cfg.get('sofia_name') or 'Sofía',
+            'sofia_persona':    cfg.get('sofia_persona') or '',
+            'sofia_extra_info': cfg.get('sofia_extra_info') or '',
+            'anthropic_key':    '••••••' if cfg.get('anthropic_key') else '',
+            'has_key':          bool(cfg.get('anthropic_key')),
+        })
+    d = request.get_json()
+    existing = get_wa_config()
+    anthropic_key = d.get('anthropic_key', '')
+    if anthropic_key and '•' in anthropic_key:
+        anthropic_key = existing.get('anthropic_key', '')
+    if existing:
+        db().execute('''UPDATE whatsapp_config
+                        SET sofia_name=?, sofia_persona=?, sofia_extra_info=?,
+                            anthropic_key=COALESCE(NULLIF(?,\'\'), anthropic_key),
+                            updated_at=datetime('now')
+                        WHERE id=1''',
+                     (d.get('sofia_name', 'Sofía'), d.get('sofia_persona', ''),
+                      d.get('sofia_extra_info', ''), anthropic_key or None))
+    else:
+        db().execute('''INSERT INTO whatsapp_config
+                        (id, sofia_name, sofia_persona, sofia_extra_info, anthropic_key)
+                        VALUES (1,?,?,?,?)''',
+                     (d.get('sofia_name', 'Sofía'), d.get('sofia_persona', ''),
+                      d.get('sofia_extra_info', ''), anthropic_key or None))
     db().commit()
     return jsonify(success=True)
 

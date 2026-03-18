@@ -233,6 +233,18 @@ def init_db():
     if 'anthropic_key' not in wa_cols and wa_cols:
         c.execute("ALTER TABLE whatsapp_config ADD COLUMN anthropic_key TEXT")
 
+    # Migrar leads para agregar client_id si no existe
+    lead_cols = [r[1] for r in c.execute('PRAGMA table_info(leads)').fetchall()]
+    if lead_cols and 'client_id' not in lead_cols:
+        c.execute("ALTER TABLE leads ADD COLUMN client_id INTEGER")
+
+    # Migrar whatsapp_config para sofia persona
+    wa_cols2 = [r[1] for r in c.execute('PRAGMA table_info(whatsapp_config)').fetchall()]
+    if wa_cols2:
+        for col in ['sofia_name', 'sofia_persona', 'sofia_extra_info']:
+            if col not in wa_cols2:
+                c.execute(f"ALTER TABLE whatsapp_config ADD COLUMN {col} TEXT")
+
     # Migrar leads si no existe tabla (las tablas se crean via executescript)
     lead_tables = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
     # (las tablas se crean via executescript, no necesita migración extra aquí)
